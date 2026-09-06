@@ -123,6 +123,34 @@ def prune() -> int:
     return dropped
 
 
+CSV_COLUMNS = (
+    "at", "cdn", "cdn_value", "confirmed",
+    "ratio_avg", "ratio_worst", "risk_share", "networks",
+)
+
+
+def csv_rows(records: list[dict]) -> list[list[str]]:
+    """The journal as rows for a spreadsheet, header first.
+
+    Networks collapse into one space-separated cell rather than spreading
+    across a variable number of columns, so the shape stays rectangular
+    whatever a round happened to find.
+    """
+    rows = [list(CSV_COLUMNS)]
+    for record in sorted(records, key=lambda r: r.get("at", "")):
+        rows.append([
+            str(record.get("at", "")),
+            str(record.get("cdn", "")),
+            str(record.get("cdn_value", "")),
+            "true" if record.get("confirmed", True) else "false",
+            str(record.get("ratio_avg", "")),
+            str(record.get("ratio_worst", "")),
+            str(record.get("risk_share", "")),
+            " ".join(record.get("networks") or []),
+        ])
+    return rows
+
+
 def load() -> list[dict]:
     if not config.HISTORY_FILE.exists():
         return []

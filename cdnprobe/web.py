@@ -6,9 +6,13 @@ the image, so this is http.server with a hand-written handler.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+from datetime import datetime, timezone
 
 from . import bench, config, storage
 from .daemon import Runner
@@ -122,6 +126,8 @@ pre{margin:0;max-height:280px;overflow:auto;font-size:12px;color:var(--muted);
 .tabs button:disabled{opacity:.4}
 .tabs .count{opacity:.7;font-weight:400;margin-left:5px}
 .legend{color:var(--muted);font-size:12px;margin-top:10px}
+.legend a{color:var(--accent);text-decoration:none}
+.legend a:hover{text-decoration:underline}
 .chart-head{display:flex;justify-content:space-between;align-items:flex-start;
   gap:16px;flex-wrap:wrap;margin-bottom:10px}
 .chart-title{font-weight:600}
@@ -233,6 +239,17 @@ pre{margin:0;max-height:280px;overflow:auto;font-size:12px;color:var(--muted);
   <div class="legend">One benched CDN is re-tested each round, oldest check
     first, and released automatically if it now passes. New CDNs the provider
     adds are always measured; the account\'s automatic option is never benched.</div>
+</div>
+
+<div class="card">
+  <div class="legend" style="margin:0">
+    Data endpoints, no key needed:
+    <a href="api/stats.json" target="_blank">stats.json</a> &middot;
+    <a href="api/stats.json?part=evening" target="_blank">stats.json?part=evening</a> &middot;
+    <a href="api/series.json" target="_blank">series.json</a> &middot;
+    <a href="api/history.jsonl">history.jsonl</a> &middot;
+    <a href="api/history.csv">history.csv</a>
+  </div>
 </div>
 
 <div class="card"><pre id="log"></pre></div>
@@ -545,16 +562,34 @@ refresh(); setInterval(refresh, 3000);
 
 class Handler(BaseHTTPRequestHandler):
     runner: Runner
+    _head_only = False
 
     def log_message(self, *args):  # keep the access log out of the way
         pass
 
-    def _send(self, code: int, body: bytes, content_type: str) -> None:
+    def _send(self, code: int, body: bytes, content_type: str,
+              filename: str = "") -> None:
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
+        # Read-only data about the viewer's own account on their own network:
+        # open it up so a script or a spreadsheet can fetch it directly.
+        self.send_header("Access-Control-Allow-Origin", "*")
+        if filename:
+            self.send_header(
+                "Content-Disposition", f'attachment; filename="{filename}"'
+            )
         self.end_headers()
-        self.wfile.write(body)
+        if not self._head_only:
+            self.wfile.write(body)
+
+    def do_HEAD(self) -> None:
+        """Same headers as GET, no body. curl -I and monitors rely on it."""
+        self._head_only = True
+        try:
+            self.do_GET()
+        finally:
+            self._head_only = False
 
     def do_GET(self) -> None:
         path = self.path.split("?")[0].rstrip("/") or "/"
@@ -562,9 +597,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
         elif path == "/api/state":
             records = storage.load()
-            query = parse_qs(urlparse(self.path).query)
-            part = (query.get("part") or [""])[0]
-            part = part if part in PARTS else ""
+            part = self._part()
             table = aggregate(records, part=part)
             pick = best(table)
             payload = {
@@ -582,8 +615,65 @@ class Handler(BaseHTTPRequestHandler):
                 ],
             }
             self._send(200, json.dumps(payload).encode("utf-8"), "application/json")
+        elif path == "/api/stats.json":
+            records = storage.load()
+            part = self._part()
+            table = aggregate(records, part=part)
+            pick = best(table)
+            payload = {
+                "generated_at": datetime.now(timezone.utc).isoformat(
+                    timespec="seconds"
+                ),
+                "part": part or "all",
+                "measurements": len(records),
+                "coverage": coverage(records),
+                "leaders": leaders(records),
+                "pick": pick.as_dict() if pick else None,
+                "cdns": [row.as_dict() for row in table],
+            }
+            self._send(
+                200,
+                json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"),
+                "application/json; charset=utf-8",
+            )
+
+        elif path == "/api/series.json":
+            self._send(
+                200,
+                json.dumps(
+                    {"danger": config.RATIO_DANGER,
+                     "series": series(storage.load(), limit=self._limit(5))},
+                    ensure_ascii=False, indent=2,
+                ).encode("utf-8"),
+                "application/json; charset=utf-8",
+            )
+
+        elif path == "/api/history.jsonl":
+            body = "".join(
+                json.dumps(r, ensure_ascii=False) + "\n"
+                for r in sorted(storage.load(), key=lambda r: r.get("at", ""))
+            ).encode("utf-8")
+            self._send(200, body, "application/x-ndjson; charset=utf-8",
+                       filename="cdnprobe-history.jsonl")
+
+        elif path == "/api/history.csv":
+            buffer = io.StringIO()
+            csv.writer(buffer).writerows(storage.csv_rows(storage.load()))
+            # BOM so spreadsheets open the Cyrillic CDN names correctly.
+            body = b"\xef\xbb\xbf" + buffer.getvalue().encode("utf-8")
+            self._send(200, body, "text/csv; charset=utf-8",
+                       filename="cdnprobe-history.csv")
+
         else:
             self._send(404, b"not found", "text/plain")
+
+    def _part(self) -> str:
+        part = (parse_qs(urlparse(self.path).query).get("part") or [""])[0]
+        return part if part in PARTS else ""
+
+    def _limit(self, fallback: int) -> int:
+        raw = (parse_qs(urlparse(self.path).query).get("limit") or [""])[0]
+        return int(raw) if raw.isdigit() and 0 < int(raw) <= 50 else fallback
 
     def do_POST(self) -> None:
         path = self.path.rstrip("/")

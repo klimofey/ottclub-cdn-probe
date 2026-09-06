@@ -12,7 +12,7 @@ Several resellers run the same OTTClub panel — **ilook.tv** and
 **vipdrive.net** among them — so point `PANEL_URL` at whichever one your
 subscription is with.
 
-![tests](https://img.shields.io/badge/tests-115%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-121%20passing-brightgreen)
 ![docker](https://img.shields.io/badge/docker-1.32GB-blue)
 
 ![dashboard](dashboard.png)
@@ -132,6 +132,30 @@ rather than the best median.
 `ROUND_PAUSE=manual` holds the daemon still until you press **Run round** on
 the dashboard. Handy if you only want to measure during the hours you
 actually watch.
+
+## Data endpoints
+
+Everything the dashboard shows is available as plain files, no key required:
+
+| Path | What it gives |
+|---|---|
+| `/api/stats.json` | The ranked table, the pick, coverage and the per-part leaders |
+| `/api/stats.json?part=evening` | The same for one part of the day |
+| `/api/series.json` | The chart's time series (`?limit=` to widen it) |
+| `/api/history.jsonl` | Every measurement, one JSON object per line |
+| `/api/history.csv` | The same as a spreadsheet (UTF-8 BOM, so names open correctly) |
+
+```bash
+curl -s localhost:8080/api/stats.json | jq '.pick'
+curl -s 'localhost:8080/api/stats.json?part=evening' | jq '.cdns[0]'
+curl -O localhost:8080/api/history.csv
+```
+
+`Access-Control-Allow-Origin: *` is set, so a browser script or a spreadsheet
+can pull them directly. **There is no authentication anywhere** — on the
+dashboard or these endpoints. That is fine on a home network and wrong on the
+open internet: put it behind a reverse proxy with auth, or a VPN, before
+exposing it.
 
 ## The chart
 
