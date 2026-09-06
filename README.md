@@ -12,7 +12,7 @@ Several resellers run the same OTTClub panel — **ilook.tv** and
 **vipdrive.net** among them — so point `PANEL_URL` at whichever one your
 subscription is with.
 
-![tests](https://img.shields.io/badge/tests-131%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-136%20passing-brightgreen)
 ![docker](https://img.shields.io/badge/docker-1.32GB-blue)
 
 ![dashboard](dashboard.png)
@@ -294,6 +294,12 @@ what the viewer really receives it was 1.81x.
 **The headline is the median across rounds, not the mean.** A single freak
 round moves a mean and leaves a median alone — which matters, because freak
 rounds happen (see below).
+
+A CDN is called out for dropping only when the dips repeat - at least two
+rounds under the floor, and a quarter of its rounds. A lone dip is noise: a
+measurement caught mid-propagation, or a moment of congestion. Letting one
+overrule a healthy median is the same mistake the median exists to avoid. The
+dip is still counted and shown, it just no longer decides alone.
 
 The table also shows the **worst round ever recorded** and the **spread**,
 because streams break in the dips, not in the average. A CDN with a 9x median

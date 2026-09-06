@@ -216,6 +216,7 @@ pre{margin:0;max-height:280px;overflow:auto;font-size:12px;color:var(--muted);
       <th data-key="median">Median</th>
       <th data-key="worst_run">Worst</th>
       <th data-key="best_run">Best</th>
+      <th data-key="bad_runs">Dips</th>
       <th data-key="spread">Spread</th>
       <th data-key="risk_share">Risk</th>
       <th data-key="verdict" style="text-align:left">Verdict</th>
@@ -226,6 +227,7 @@ pre{margin:0;max-height:280px;overflow:auto;font-size:12px;color:var(--muted);
   <div class="legend">
     MEDIAN typical margin, unmoved by one odd round &middot;
     WORST the worst round ever seen, where streams actually break &middot;
+    DIPS rounds under the floor - one is noise, a pattern is not &middot;
     SPREAD standard deviation across rounds &middot;
     RISK mean share of segments with too little margin.
     Click any column to sort.
@@ -299,7 +301,7 @@ function render(){
                    benched.has(x.cdn) ? 'is-benched' : ''].filter(Boolean).join(' ');
     return `<tr class="${klass}"><td>${i+1}</td><td>${x.cdn}</td><td>${x.runs}</td>
       <td>${x.median.toFixed(2)}x</td><td>${x.worst_run.toFixed(2)}x</td>
-      <td>${x.best_run.toFixed(2)}x</td><td>${x.spread.toFixed(2)}</td>
+      <td>${x.best_run.toFixed(2)}x</td><td>${x.bad_runs || ''}</td><td>${x.spread.toFixed(2)}</td>
       <td>${(x.risk_share*100).toFixed(0)}%</td>
       <td style="text-align:left" class="${cls(x.verdict)}">${x.verdict}</td></tr>`;
   }).join('');

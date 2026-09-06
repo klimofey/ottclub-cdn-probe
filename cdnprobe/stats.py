@@ -36,11 +36,18 @@ def part_of_day(at: str) -> str:
 
 STEADY_SPREAD = 1.5  # above this, results jump around too much to trust
 
+# A CDN is condemned for dipping only when the dips repeat. One bad round is
+# noise - a measurement caught mid-propagation, or a moment of congestion -
+# and letting a single one override a healthy median is the same mistake the
+# median exists to avoid.
+DROPOUT_SHARE = 0.25
+
 
 @dataclass(frozen=True)
 class CdnStats:
     cdn: str
     runs: int
+    bad_runs: int
     median: float
     mean: float
     worst_run: float
@@ -60,7 +67,8 @@ class CdnStats:
         """
         if self.runs < 2:
             return "needs more rounds"
-        if self.worst_run < config.RATIO_DANGER:
+        # Repeatedly, not once: a lone dip among healthy rounds is noise.
+        if self.bad_runs >= 2 and self.bad_runs / self.runs >= DROPOUT_SHARE:
             return "drops out"
         if self.median >= config.RATIO_GOOD:
             return "solid" if self.spread < STEADY_SPREAD else "good but jumpy"
@@ -93,6 +101,7 @@ def aggregate(records: list[dict], part: str = "") -> list[CdnStats]:
             CdnStats(
                 cdn=cdn,
                 runs=len(items),
+                bad_runs=sum(1 for r in ratios if r < config.RATIO_DANGER),
                 median=round(statistics.median(ratios), 2),
                 mean=round(statistics.fmean(ratios), 2),
                 worst_run=round(min(ratios), 2),
