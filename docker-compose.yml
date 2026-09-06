@@ -1,0 +1,44 @@
+services:
+  cdnprobe:
+    build: .
+    image: cdnprobe
+    container_name: cdnprobe
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    environment:
+      # Account credentials - the only required settings.
+      PANEL_URL: ${PANEL_URL:-https://ilook.tv}
+      ILOOK_EMAIL: ${ILOOK_EMAIL:?set ILOOK_EMAIL in .env}
+      ILOOK_PASSWORD: ${ILOOK_PASSWORD:?set ILOOK_PASSWORD in .env}
+
+      # Gap between full rounds:
+      #   none      back to back
+      #   1h / 30m  a fixed wait
+      #   manual    only when you press Run round on the dashboard
+      ROUND_PAUSE: ${ROUND_PAUSE:-none}
+
+      # Only run rounds inside these hours, so the account stays watchable
+      # the rest of the day. Empty means no restriction. Set TZ too, the
+      # window is read in local time.
+      ACTIVE_HOURS: ${ACTIVE_HOURS:-}
+      TZ: ${TZ:-UTC}
+
+      # Put the account on the best proven CDN when a round ends.
+      AUTO_APPLY: ${AUTO_APPLY:-false}
+
+      # How long measurements are kept. Age matters more than disk here:
+      # CDN quality drifts, so stale rounds blur the median.
+      HISTORY_DAYS: ${HISTORY_DAYS:-30}
+      HISTORY_MAX_RECORDS: ${HISTORY_MAX_RECORDS:-20000}
+
+      # Measurement tuning; the defaults are sensible.
+      DISCOVERY_ROUNDS: ${DISCOVERY_ROUNDS:-20}
+      CHANNELS: ${CHANNELS:-2}
+      EDGE_CAP_SECONDS: ${EDGE_CAP_SECONDS:-3.0}
+      EDGE_CAP_MB: ${EDGE_CAP_MB:-6}
+    volumes:
+      - cdnprobe-data:/data
+
+volumes:
+  cdnprobe-data:

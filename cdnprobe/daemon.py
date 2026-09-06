@@ -1,0 +1,300 @@
+"""The round runner: walks every CDN, measures it, records the result.
+
+One round covers all CDNs the account offers. Its length is dictated by the
+provider, which allows a CDN change only about once every five minutes, so a
+round takes a couple of hours regardless of how fast the measuring itself is.
+"""
+
+from __future__ import annotations
+
+import threading
+import time
+from datetime import datetime, timezone
+
+from . import config, stats, storage
+from .panel import CdnOption, Panel
+from .parsing import network_of
+from .stream import balancer_of, client, discover_channel, fetch_channels, probe_channels
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+class Runner:
+    """Owns the measuring loop and the state the dashboard reads."""
+
+    def __init__(self, pause: int | None):
+        self.pause = pause
+        self._trigger = threading.Event()
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._state = {
+            "status": "starting",
+            "detail": "",
+            "round": 0,
+            "cdn": "",
+            "cdn_index": 0,
+            "cdn_total": 0,
+            "started_at": now(),
+            "round_started_at": "",
+            "last_round_finished_at": "",
+            "next_round_at": "",
+            "pause": config.describe_pause(pause),
+            "active_hours": config.ACTIVE_HOURS or "always",
+            "auto_apply": config.AUTO_APPLY,
+            "applied_cdn": "",
+            "playlist_found": False,
+            "balancer": "",
+            "channels": 0,
+            "log": [],
+        }
+
+    # --- state shared with the web layer ----------------------------------
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return dict(self._state, log=list(self._state["log"]))
+
+    def _set(self, **fields) -> None:
+        with self._lock:
+            self._state.update(fields)
+
+    def _log(self, message: str) -> None:
+        line = f"{datetime.now(timezone.utc).strftime('%H:%M:%S')} {message}"
+        print(line, flush=True)
+        with self._lock:
+            self._state["log"] = ([line] + self._state["log"])[:200]
+
+    def request_run(self) -> bool:
+        """Asks for a round now. Used by the dashboard button."""
+        if self._trigger.is_set():
+            return False
+        self._trigger.set()
+        return True
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._trigger.set()
+
+    # --- the loop ---------------------------------------------------------
+
+    def run_forever(self) -> None:
+        while not self._stop.is_set():
+            if self.pause is None and not self._trigger.is_set():
+                self._set(status="waiting", detail="manual mode - press Run round",
+                          next_round_at="")
+                self._trigger.wait()
+            self._trigger.clear()
+            if self._stop.is_set():
+                return
+
+            self._await_window()
+            if self._stop.is_set():
+                return
+
+            round_number = self._state["round"] + 1
+            self._set(round=round_number, status="running",
+                      round_started_at=now(), detail="")
+            self._log(f"=== round {round_number} starting ===")
+            try:
+                self.run_round()
+                self._log(f"=== round {round_number} finished ===")
+            except Exception as error:  # a bad round must not kill the daemon
+                self._log(f"round failed: {type(error).__name__}: {error}")
+                self._set(status="error", detail=f"{type(error).__name__}: {error}")
+                time.sleep(60)
+
+            self._set(last_round_finished_at=now(), cdn="", cdn_index=0)
+            self._wait_between_rounds()
+
+    def _wait_between_rounds(self) -> None:
+        if self.pause is None:
+            return
+        if self.pause == 0:
+            self._set(status="running", detail="continuous - next round starts now")
+            return
+        resume = time.time() + self.pause
+        self._set(
+            status="sleeping",
+            detail=f"next round in {config.describe_pause(self.pause)}",
+            next_round_at=datetime.fromtimestamp(resume, timezone.utc)
+            .isoformat(timespec="seconds"),
+        )
+        self._log(f"pausing for {config.describe_pause(self.pause)}")
+        # Wake early if someone presses Run round.
+        self._trigger.wait(timeout=self.pause)
+
+    def _await_window(self) -> None:
+        """Holds off while outside the allowed hours.
+
+        Checked before every CDN rather than once per round: a round runs for
+        hours, so a window that was open at the start may well have closed by
+        the middle, and that is exactly when someone wants to watch TV.
+        """
+        window = config.active_window()
+        if window is None:
+            return
+        while not self._stop.is_set():
+            local = datetime.now().astimezone()
+            wait = config.seconds_until_window(
+                local.hour * 60 + local.minute, window
+            )
+            if wait == 0:
+                return
+            self._set(
+                status="outside hours",
+                detail=f"active hours are {config.ACTIVE_HOURS}; resuming in "
+                       f"{wait // 3600}h{(wait % 3600) // 60:02d}m",
+            )
+            self._log(f"outside active hours, sleeping {wait // 60}m")
+            # Re-check every few minutes rather than sleeping the whole gap,
+            # so a config change or a stop request is noticed promptly.
+            if self._stop.wait(timeout=min(wait, 300)):
+                return
+            self._set(status="running", detail="")
+
+    def _auto_apply(self, panel: Panel, options: list[CdnOption]) -> None:
+        """Leaves the account on the CDN that has proven itself.
+
+        Only a verdict of "solid" qualifies: a high median that jumps around
+        is not something to hand a viewer.
+        """
+        pick = stats.best(stats.aggregate(storage.load()))
+        if pick is None:
+            self._log("auto-apply: nothing has proven steady yet, leaving as is")
+            return
+        target = next((o for o in options if o.label == pick.cdn), None)
+        if target is None:
+            self._log(f"auto-apply: {pick.cdn} is no longer offered, skipping")
+            return
+        self._log(
+            f"auto-apply: switching to {pick.cdn} "
+            f"(median {pick.median:.2f}x over {pick.runs} rounds)"
+        )
+        if self._apply(panel, target):
+            self._set(applied_cdn=pick.cdn)
+
+    # --- one round --------------------------------------------------------
+
+    def run_round(self) -> None:
+        with Panel(headless=True) as panel:
+            if panel.ensure_logged_in():
+                self._log("logged in")
+            else:
+                self._log("reusing cached session")
+
+            playlist_url = panel.playlist_url()
+            self._set(playlist_found=True)
+            self._log("playlist link discovered on the download page")
+
+            options = panel.cdn_options()
+            current = panel.current_cdn()
+            self._set(cdn_total=len(options))
+            self._log(f"{len(options)} CDNs offered by the account")
+
+            with client() as http:
+                channels = fetch_channels(http, playlist_url)[: config.CHANNELS]
+                if not channels:
+                    raise RuntimeError("playlist contained no channels")
+                host, _ = balancer_of(channels)
+                self._set(balancer=host, channels=len(channels))
+                self._log(f"balancer {host}, sampling {len(channels)} channels")
+
+                watch = channels[0]
+                before = discover_channel(http, watch, rounds=5, pause=1.0).networks
+                selected = current.value
+
+                for index, option in enumerate(options, start=1):
+                    if self._stop.is_set():
+                        return
+                    self._await_window()
+                    if self._stop.is_set():
+                        return
+                    self._set(cdn=option.label, cdn_index=index)
+                    self._log(f"[{index}/{len(options)}] {option.label}")
+
+                    confirmed = True
+                    if option.value != selected:
+                        if not self._apply(panel, option):
+                            continue
+                        selected = option.value
+                        confirmed = self._await_switch(http, watch, before)
+
+                    results = probe_channels(
+                        http, channels, config.DISCOVERY_ROUNDS,
+                        on_event=lambda kind, msg: self._log(f"  {msg}"),
+                    )
+                    if not results:
+                        self._log("  no edges measured, skipping")
+                        continue
+
+                    measured = {
+                        network_of(r.ip) for r in results
+                        if r.channel_id == watch.channel_id
+                    }
+                    # A brand new site proves the switch landed far more
+                    # reliably than the short probe above, which samples too
+                    # few times to catch a rarely served site.
+                    if measured and measured - before:
+                        confirmed = True
+                    record = storage.append(
+                        option.label, option.value, results, confirmed
+                    )
+                    self._log(
+                        f"  {option.label}: {record['ratio_avg']:.2f}x, "
+                        f"risk {record['risk_share'] * 100:.0f}%"
+                        f"{'' if confirmed else ' (switch unconfirmed)'}"
+                    )
+                    if measured:
+                        before = measured
+
+            if config.AUTO_APPLY:
+                self._auto_apply(panel, options)
+
+    def _apply(self, panel: Panel, option: CdnOption, attempts: int = 4) -> bool:
+        """Selects a CDN, sitting out the provider's cooldown."""
+        for attempt in range(1, attempts + 1):
+            if self._stop.is_set():
+                return False
+            result = panel.set_cdn(option.value)
+            if result.accepted:
+                self._log("  applied")
+                return True
+            if not result.rate_limited:
+                self._log(f"  refused: {result.message or 'no reason given'}")
+                return False
+            wait = result.cooldown_seconds
+            self._set(status="cooldown",
+                      detail=f"{option.label}: waiting {wait // 60}m for the "
+                             f"provider cooldown")
+            self._log(f"  cooldown, waiting {wait // 60}m "
+                      f"(attempt {attempt}/{attempts})")
+            if self._stop.wait(timeout=wait):
+                return False
+            self._set(status="running", detail="")
+        self._log("  cooldown never cleared, skipping")
+        return False
+
+    def _await_switch(self, http, watch, before: set[str]) -> bool:
+        """Waits for the edge pool to turn over.
+
+        The panel promises 5-10 minutes; in practice it has been seconds.
+        Watching for the change beats waiting a fixed time, and a timeout is
+        not a failure - CDNs share some sites, and the full measurement that
+        follows confirms the switch far more reliably anyway.
+        """
+        deadline = time.monotonic() + config.PROPAGATION_TIMEOUT
+        started = time.monotonic()
+        while time.monotonic() < deadline and not self._stop.is_set():
+            fresh = discover_channel(http, watch, rounds=5, pause=1.0).networks
+            if fresh and (fresh - before or len(fresh & before) / len(fresh) < 0.6):
+                self._log(f"  pool changed after {time.monotonic() - started:.0f}s")
+                return True
+            if self._stop.wait(timeout=config.PROPAGATION_POLL):
+                return False
+        return False
+
+
+def current_stats() -> list[stats.CdnStats]:
+    return stats.aggregate(storage.load())

@@ -1,0 +1,125 @@
+"""Aggregating many rounds into a verdict per CDN."""
+
+from __future__ import annotations
+
+import statistics
+from dataclasses import asdict, dataclass
+
+from . import config
+
+STEADY_SPREAD = 1.5  # above this, results jump around too much to trust
+
+
+@dataclass(frozen=True)
+class CdnStats:
+    cdn: str
+    runs: int
+    median: float
+    mean: float
+    worst_run: float
+    best_run: float
+    spread: float
+    worst_site: float
+    risk_share: float
+    confirmed_runs: int
+    last_seen: str
+
+    @property
+    def verdict(self) -> str:
+        """Judged on level AND steadiness.
+
+        A high median with a wide spread is worse than a slightly lower one
+        that holds: streams break in the dips, not in the average.
+        """
+        if self.runs < 2:
+            return "needs more rounds"
+        if self.worst_run < config.RATIO_DANGER:
+            return "drops out"
+        if self.median >= config.RATIO_GOOD:
+            return "solid" if self.spread < STEADY_SPREAD else "good but jumpy"
+        return "mediocre"
+
+    def as_dict(self) -> dict:
+        data = asdict(self)
+        data["verdict"] = self.verdict
+        return data
+
+
+def aggregate(records: list[dict]) -> list[CdnStats]:
+    """Rolls journal entries up per CDN.
+
+    The headline figure is the median, not the mean: one bad round - a
+    measurement that caught the previous CDN's pool before the switch landed
+    - shifts a mean and leaves a median alone.
+    """
+    buckets: dict[str, list[dict]] = {}
+    for record in records:
+        buckets.setdefault(record["cdn"], []).append(record)
+
+    result = []
+    for cdn, items in buckets.items():
+        ratios = [i["ratio_avg"] for i in items]
+        result.append(
+            CdnStats(
+                cdn=cdn,
+                runs=len(items),
+                median=round(statistics.median(ratios), 2),
+                mean=round(statistics.fmean(ratios), 2),
+                worst_run=round(min(ratios), 2),
+                best_run=round(max(ratios), 2),
+                spread=round(statistics.pstdev(ratios) if len(ratios) > 1 else 0.0, 2),
+                worst_site=round(min(i["ratio_worst"] for i in items), 2),
+                risk_share=round(statistics.fmean(i["risk_share"] for i in items), 3),
+                confirmed_runs=sum(1 for i in items if i.get("confirmed", True)),
+                last_seen=max(i["at"] for i in items),
+            )
+        )
+    # Ordered by median, ties broken by the worst round: steadiness wins.
+    return sorted(result, key=lambda s: (-s.median, -s.worst_run))
+
+
+def best(stats: list[CdnStats]) -> CdnStats | None:
+    """The recommendation, or None while nothing has proven itself."""
+    solid = [s for s in stats if s.verdict == "solid"]
+    return solid[0] if solid else None
+
+
+def table(stats: list[CdnStats]) -> str:
+    if not stats:
+        return "Journal is empty. Run a round first."
+
+    lines = [
+        f"{'#':<3}{'CDN':<26}{'ROUNDS':>7}{'MEDIAN':>8}{'WORST':>8}"
+        f"{'BEST':>8}{'SPREAD':>8}{'RISK':>7}  VERDICT",
+        "-" * 96,
+    ]
+    for index, s in enumerate(stats, start=1):
+        lines.append(
+            f"{index:<3}{s.cdn:<26}{s.runs:>7}{s.median:>7.2f}x"
+            f"{s.worst_run:>7.2f}x{s.best_run:>7.2f}x"
+            f"{s.spread:>8.2f}{s.risk_share * 100:>6.0f}%  {s.verdict}"
+        )
+
+    lines.append("")
+    pick = best(stats)
+    if pick:
+        lines.append(
+            f"PICK: {pick.cdn} - median {pick.median:.2f}x over {pick.runs} "
+            f"rounds, worst round {pick.worst_run:.2f}x, spread +/-{pick.spread:.2f}"
+        )
+    elif any(s.runs >= 2 for s in stats):
+        lines.append(
+            f"Nothing has proven steady yet. Leader by median: "
+            f"{stats[0].cdn} ({stats[0].median:.2f}x over {stats[0].runs} rounds)"
+        )
+    else:
+        lines.append("At least two rounds are needed before steadiness means anything.")
+
+    lines += [
+        "",
+        "MEDIAN  typical margin; unmoved by a single outlier round.",
+        "WORST   the worst round ever recorded - this is where streams break.",
+        "SPREAD  standard deviation across rounds; lower is more predictable.",
+        f"RISK    mean share of segments below {config.RATIO_DANGER}x margin.",
+    ]
+    return "\n".join(lines)
