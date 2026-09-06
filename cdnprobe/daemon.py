@@ -247,8 +247,7 @@ class Runner:
             original = [o.label for o in all_options]
             options = bench.active(all_options, protected)
             benched = bench.load()
-            # One benched CDN per round gets re-tested, oldest check first, so
-            # a CDN that recovers is not shut out forever.
+
             # Least-measured first. A round always restarting at the top of
             # the list means any interruption - an update, a crash, a reboot -
             # re-measures the same opening CDNs and never reaches the tail,
@@ -258,11 +257,16 @@ class Runner:
             seen = Counter(r["cdn"] for r in storage.load())
             options.sort(key=lambda o: (seen[o.label], original.index(o.label)))
 
+            # One benched CDN per round is re-tested, oldest check first, so a
+            # CDN that recovers is not shut out forever. It goes FIRST: rounds
+            # get interrupted often enough that anything at the tail is never
+            # reached, and a parole that never runs makes the safeguard
+            # decorative. It costs one slot wherever it sits.
             paroled = bench.next_parole(benched)
             if paroled:
-                options = options + [
+                options = [
                     o for o in all_options if o.label in paroled
-                ]
+                ] + options
                 self._log(f"parole this round: {', '.join(paroled)}")
             self._set(cdn_total=len(options), active_cdns=len(options),
                       benched=[{"cdn": k, **v} for k, v in benched.items()])

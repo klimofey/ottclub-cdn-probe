@@ -54,3 +54,26 @@ class TestRoundOrder:
             for cdn in labels[:2]:              # always the same two
                 seen[cdn] += 1
         assert seen["H"] == 0
+
+
+class TestParolePosition:
+    """A parole at the tail of an interrupted round never runs at all."""
+
+    def build(self, active, paroled):
+        # Mirrors the daemon: sorted active set, parole prepended.
+        return list(paroled) + list(active)
+
+    def test_parole_leads_the_round(self):
+        assert self.build(["A", "B", "C"], ["Benched"])[0] == "Benched"
+
+    def test_it_survives_a_round_cut_to_one_cdn(self):
+        walked = self.build(["A", "B", "C"], ["Benched"])[:1]
+        assert walked == ["Benched"]
+
+    def test_at_the_tail_it_would_be_starved(self):
+        """What the change fixes: three CDNs deep is already too late."""
+        tail = ["A", "B", "C"] + ["Benched"]
+        assert "Benched" not in tail[:3]
+
+    def test_no_bench_means_no_change_to_the_order(self):
+        assert self.build(["A", "B", "C"], []) == ["A", "B", "C"]

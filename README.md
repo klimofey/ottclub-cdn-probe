@@ -12,7 +12,7 @@ Several resellers run the same OTTClub panel — **ilook.tv** and
 **vipdrive.net** among them — so point `PANEL_URL` at whichever one your
 subscription is with.
 
-![tests](https://img.shields.io/badge/tests-127%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-131%20passing-brightgreen)
 ![docker](https://img.shields.io/badge/docker-1.32GB-blue)
 
 ![dashboard](dashboard.png)
@@ -217,7 +217,9 @@ tonight". Without it you cannot tell those apart.
 **New CDNs are always measured.** An option the provider adds tomorrow has no
 history, so there are no grounds to skip it.
 
-**Benched CDNs are not forgotten.** One per round — the one unchecked longest
+**Benched CDNs are not forgotten.** One per round — the one unchecked longest,
+and it is measured **first**: rounds get interrupted often enough that anything
+at the tail is never reached, and a parole that never runs is decoration
 — is let out on parole and measured again. If it now passes the same test
 that benched it, it is released automatically; there is no point learning it
 recovered and keeping it out anyway. The round-robin paces itself: with nine
