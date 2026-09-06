@@ -17,12 +17,6 @@ subscription is with.
 
 ![dashboard](dashboard.png)
 
-<details><summary>Dark theme</summary>
-
-![dashboard, dark theme](dashboard-dark.png)
-
-</details>
-
 ---
 
 ## ⚠️ Do not point this at the account you watch on — unless you set active hours
@@ -138,6 +132,19 @@ rather than the best median.
 `ROUND_PAUSE=manual` holds the daemon still until you press **Run round** on
 the dashboard. Handy if you only want to measure during the hours you
 actually watch.
+
+## The chart
+
+The dashboard plots the leading CDNs' margin over time - one line each, with
+the `2x` floor marked. It exists because the table cannot show *when* things
+changed, and with this provider the when matters: the same CDN swung fourfold
+across one evening.
+
+Only the top few CDNs are drawn. Twenty lines is not a chart, and the question
+worth asking is how the plausible candidates behave, not how the hopeless ones
+do. Hovering names the measurement under the cursor - each CDN is measured at
+its own moment, so the nearest real point is shown rather than a shared
+vertical slice that would imply simultaneity that does not exist.
 
 ## Time of day
 

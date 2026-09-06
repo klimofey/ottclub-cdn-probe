@@ -108,6 +108,41 @@ def aggregate(records: list[dict], part: str = "") -> list[CdnStats]:
     return sorted(result, key=lambda s: (-s.median, -s.worst_run))
 
 
+def leaders(records: list[dict]) -> dict[str, str]:
+    """The best CDN in each part of the day.
+
+    Answers the question the single table cannot: whether one CDN wins all
+    day or the evening wants a different one from the night.
+    """
+    out = {}
+    for name in PARTS:
+        pick = best(aggregate(records, part=name))
+        out[name] = pick.cdn if pick else ""
+    return out
+
+
+def series(records: list[dict], limit: int = 5) -> list[dict]:
+    """Time series for the leading CDNs, newest measurements last.
+
+    Only the leaders: a line per CDN across twenty of them is unreadable, and
+    the question the chart answers is how the plausible ones behave over time.
+    """
+    ranked = [row.cdn for row in aggregate(records)[:limit]]
+    order = {cdn: index for index, cdn in enumerate(ranked)}
+    grouped: dict[str, list[dict]] = {cdn: [] for cdn in ranked}
+    for record in sorted(records, key=lambda r: r.get("at", "")):
+        cdn = record["cdn"]
+        if cdn in grouped:
+            grouped[cdn].append(
+                {"at": record["at"], "ratio": record["ratio_avg"]}
+            )
+    return [
+        {"cdn": cdn, "slot": order[cdn], "points": points}
+        for cdn, points in grouped.items()
+        if points
+    ]
+
+
 def coverage(records: list[dict]) -> dict[str, int]:
     """How many measurements exist per part of the day.
 

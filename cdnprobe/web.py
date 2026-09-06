@@ -12,7 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import bench, config, storage
 from .daemon import Runner
-from .stats import PARTS, aggregate, best, coverage
+from .stats import PARTS, aggregate, best, coverage, leaders, series
 
 PAGE = """<!doctype html>
 <html lang="en"><head>
@@ -28,16 +28,26 @@ PAGE = """<!doctype html>
   --bg:#f6f7f9; --card:#fff; --ink:#12151a; --muted:#6b7280; --line:#e5e7eb;
   --good:#0f7b3f; --warn:#a86400; --bad:#b3261e; --accent:#1f5fd0;
   --live:#1f5fd0; --live-bg:rgba(31,95,208,.10);
+  --grid:#e5e7eb;
+  /* Categorical slots, fixed order, never cycled. Validated against this
+     surface: CVD dE 9.1, normal-vision dE 19.6 on adjacent pairs. */
+  --s0:#2a78d6; --s1:#eb6834; --s2:#1baf7a; --s3:#eda100; --s4:#e87ba4;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#0f1115; --card:#171a21; --ink:#e8eaed; --muted:#9aa0aa; --line:#272b34;
   --good:#4ade80; --warn:#fbbf24; --bad:#f87171; --accent:#7aa2f7;
   --live:#7aa2f7; --live-bg:rgba(122,162,247,.12);
+  --grid:#272b34;
+  /* Same eight hues re-stepped for the dark surface, not an automatic flip. */
+  --s0:#3987e5; --s1:#d95926; --s2:#199e70; --s3:#c98500; --s4:#d55181;
 }}
 :root[data-theme="dark"]{
   --bg:#0f1115; --card:#171a21; --ink:#e8eaed; --muted:#9aa0aa; --line:#272b34;
   --good:#4ade80; --warn:#fbbf24; --bad:#f87171; --accent:#7aa2f7;
   --live:#7aa2f7; --live-bg:rgba(122,162,247,.12);
+  --grid:#272b34;
+  /* Same eight hues re-stepped for the dark surface, not an automatic flip. */
+  --s0:#3987e5; --s1:#d95926; --s2:#199e70; --s3:#c98500; --s4:#d55181;
 }
 *{box-sizing:border-box}
 /* Author styles beat the browser's [hidden] rule regardless of specificity,
@@ -112,6 +122,23 @@ pre{margin:0;max-height:280px;overflow:auto;font-size:12px;color:var(--muted);
 .tabs button:disabled{opacity:.4}
 .tabs .count{opacity:.7;font-weight:400;margin-left:5px}
 .legend{color:var(--muted);font-size:12px;margin-top:10px}
+.chart-head{display:flex;justify-content:space-between;align-items:flex-start;
+  gap:16px;flex-wrap:wrap;margin-bottom:10px}
+.chart-title{font-weight:600}
+.chart-sub{color:var(--muted);font-size:12px}
+.legend-row{display:flex;gap:14px;flex-wrap:wrap;font-size:12px}
+.legend-row span{display:flex;align-items:center;gap:6px;color:var(--ink)}
+.legend-row i{width:10px;height:10px;border-radius:2px;flex:none}
+.chart-wrap{position:relative}
+#chart{width:100%;height:300px;display:block;overflow:visible}
+.tip{position:absolute;pointer-events:none;background:var(--card);
+  border:1px solid var(--line);border-radius:7px;padding:7px 10px;font-size:12px;
+  box-shadow:0 4px 14px rgba(0,0,0,.14);white-space:nowrap;z-index:5}
+.tip b{display:block;margin-bottom:2px}
+.tip .m{color:var(--muted)}
+.leaders{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin-bottom:12px;
+  color:var(--muted)}
+.leaders b{color:var(--ink);font-weight:600}
 .benched{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 0;
   border-bottom:1px solid var(--line)}
 .benched:last-child{border-bottom:0}
@@ -158,8 +185,23 @@ pre{margin:0;max-height:280px;overflow:auto;font-size:12px;color:var(--muted);
   <div style="margin-top:12px"><button id="run">Run round now</button></div>
 </div>
 
+<div class="card" id="chart-card" hidden>
+  <div class="chart-head">
+    <div>
+      <div class="chart-title">Margin over time</div>
+      <div class="chart-sub" id="chart-sub"></div>
+    </div>
+    <div class="legend-row" id="legend"></div>
+  </div>
+  <div class="chart-wrap">
+    <svg id="chart" viewBox="0 0 900 300" preserveAspectRatio="none"></svg>
+    <div class="tip" id="tip" hidden></div>
+  </div>
+</div>
+
 <div class="card">
   <div class="tabs" id="tabs"></div>
+  <div id="leaders" class="leaders"></div>
   <div class="scroll"><table>
     <thead><tr>
       <th>#</th>
@@ -260,6 +302,111 @@ document.querySelectorAll('th[data-key]').forEach(th => {
   };
 });
 
+const SERIES_COLORS = ['var(--s0)','var(--s1)','var(--s2)','var(--s3)','var(--s4)'];
+let chartData = [], danger = 2;
+
+function drawChart(){
+  const card = document.getElementById('chart-card');
+  const flat = chartData.flatMap(s => s.points);
+  // One point per series draws no line and says nothing about change.
+  card.hidden = flat.length < 2;
+  if (card.hidden) return;
+
+  const W = 900, H = 300, L = 44, R = 12, T = 14, B = 26;
+  const times = flat.map(p => Date.parse(p.at));
+  const t0 = Math.min(...times), t1 = Math.max(...times);
+  const yMax = Math.max(danger * 1.4, ...flat.map(p => p.ratio)) * 1.08;
+  const x = t => L + (t1 === t0 ? 0 : (t - t0) / (t1 - t0)) * (W - L - R);
+  const y = v => H - B - (v / yMax) * (H - T - B);
+
+  const step = yMax > 12 ? 4 : yMax > 6 ? 2 : 1;
+  let g = '';
+  for (let v = 0; v <= yMax; v += step) {
+    g += `<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"
+      stroke="var(--grid)" stroke-width="1"/>
+      <text x="${L-8}" y="${y(v)+4}" text-anchor="end" font-size="11"
+      fill="var(--muted)">${v}x</text>`;
+  }
+  // The floor below which streams stall - context, not a series.
+  g += `<line x1="${L}" x2="${W-R}" y1="${y(danger)}" y2="${y(danger)}"
+    stroke="var(--bad)" stroke-width="1" stroke-dasharray="4 4" opacity=".55"/>
+    <text x="${W-R}" y="${y(danger)-6}" text-anchor="end" font-size="11"
+    fill="var(--bad)" opacity=".8">${danger}x floor</text>`;
+
+  const fmt = t => new Date(t).toLocaleString(undefined,
+    {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+  [t0, t1].forEach((t, i) => {
+    g += `<text x="${i ? W-R : L}" y="${H-6}" text-anchor="${i ? 'end':'start'}"
+      font-size="11" fill="var(--muted)">${fmt(t)}</text>`;
+  });
+
+  chartData.forEach(s => {
+    const c = SERIES_COLORS[s.slot % SERIES_COLORS.length];
+    const pts = s.points.map(p => [x(Date.parse(p.at)), y(p.ratio)]);
+    if (pts.length > 1) {
+      g += `<polyline fill="none" stroke="${c}" stroke-width="2"
+        stroke-linejoin="round" stroke-linecap="round"
+        points="${pts.map(q => q.join(',')).join(' ')}"/>`;
+    }
+    // 2px surface ring so overlapping markers stay separable.
+    pts.forEach(q => {
+      g += `<circle cx="${q[0]}" cy="${q[1]}" r="4" fill="${c}"
+        stroke="var(--card)" stroke-width="2"/>`;
+    });
+  });
+  g += `<line id="cross" y1="${T}" y2="${H-B}" stroke="var(--muted)"
+    stroke-width="1" opacity="0" stroke-dasharray="3 3"/>`;
+  document.getElementById('chart').innerHTML = g;
+
+  document.getElementById('legend').innerHTML = chartData.map(s =>
+    `<span><i style="background:${SERIES_COLORS[s.slot % SERIES_COLORS.length]}"></i>${s.cdn}</span>`
+  ).join('');
+  document.getElementById('chart-sub').textContent =
+    `${chartData.length} leading CDNs, ${flat.length} measurements`;
+
+  hookHover(x, y, W, H);
+}
+
+function hookHover(x, y, W, H){
+  const svg = document.getElementById('chart');
+  const tip = document.getElementById('tip');
+  const cross = document.getElementById('cross');
+  // Irregular sampling: each CDN is measured at its own moment, so the
+  // honest hover is the nearest actual point, not a shared vertical slice.
+  const all = chartData.flatMap(s => s.points.map(p => ({
+    cdn: s.cdn, slot: s.slot, at: p.at, ratio: p.ratio,
+    px: x(Date.parse(p.at)), py: y(p.ratio),
+  })));
+  svg.onmousemove = e => {
+    const box = svg.getBoundingClientRect();
+    const mx = (e.clientX - box.left) / box.width * W;
+    const my = (e.clientY - box.top) / box.height * H;
+    let near = null, dist = 1e9;
+    all.forEach(p => {
+      const d = (p.px - mx) ** 2 + ((p.py - my) * 0.5) ** 2;
+      if (d < dist) { dist = d; near = p; }
+    });
+    if (!near || dist > 3000) { tip.hidden = true; cross.setAttribute('opacity', 0); return; }
+    cross.setAttribute('x1', near.px); cross.setAttribute('x2', near.px);
+    cross.setAttribute('opacity', .5);
+    tip.hidden = false;
+    tip.innerHTML = `<b>${near.cdn}</b>${near.ratio.toFixed(2)}x
+      <span class="m">&middot; ${new Date(near.at).toLocaleString(undefined,
+      {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})}</span>`;
+    tip.style.left = Math.min(near.px / W * box.width + 12, box.width - 190) + 'px';
+    tip.style.top = Math.max(near.py / H * box.height - 44, 0) + 'px';
+  };
+  svg.onmouseleave = () => { tip.hidden = true; cross.setAttribute('opacity', 0); };
+}
+
+function drawLeaders(l){
+  const named = Object.entries(l).filter(([, v]) => v);
+  document.getElementById('leaders').innerHTML = named.length
+    ? 'Best by time of day: ' + named.map(([k, v]) =>
+        `${PART_LABELS[k].split(' ')[0].toLowerCase()} <b>${v}</b>`).join(' &middot; ')
+    : '';
+}
+
 function drawTabs(cov){
   const total = Object.values(cov).reduce((a, b) => a + b, 0);
   document.getElementById('tabs').innerHTML = Object.keys(PART_LABELS).map(k => {
@@ -308,6 +455,9 @@ async function refresh(){
   rows = d.stats;
   benched = new Set(d.benched.map(b => b.cdn));
   drawTabs(d.coverage);
+  drawLeaders(d.leaders);
+  chartData = d.series; danger = d.danger;
+  drawChart();
   render();
 
   const card = document.getElementById('bench-card');
@@ -378,6 +528,9 @@ class Handler(BaseHTTPRequestHandler):
                 "measurements": len(records),
                 "part": part,
                 "coverage": coverage(records),
+                "leaders": leaders(records),
+                "series": series(records),
+                "danger": config.RATIO_DANGER,
                 "benched": [
                     {"cdn": name, **info} for name, info in bench.load().items()
                 ],
