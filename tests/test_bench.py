@@ -103,3 +103,45 @@ class TestReasons:
         out = decide(rows, protected=AUTO, min_rounds=3, below=2.0, max_active=0)
         assert out[0].runs == 5 and out[0].median == pytest.approx(1.0)
         assert out[0].reason
+
+
+class TestParole:
+    def test_picks_the_one_unchecked_longest(self):
+        from cdnprobe.bench import next_parole
+        benched = {
+            "A": {"since": "2026-09-04T00:00:00", "last_checked": "2026-09-05T00:00:00"},
+            "B": {"since": "2026-09-02T00:00:00", "last_checked": "2026-09-03T00:00:00"},
+            "C": {"since": "2026-09-01T00:00:00", "last_checked": None},
+        }
+        # Never checked counts as untouched since it was benched, so C - the
+        # oldest entry - goes first, then B, checked longest ago.
+        assert next_parole(benched, count=2) == ["C", "B"]
+
+    def test_never_checked_falls_back_to_when_it_was_benched(self):
+        from cdnprobe.bench import next_parole
+        benched = {
+            "old": {"since": "2026-09-01T00:00:00"},
+            "new": {"since": "2026-09-05T00:00:00"},
+        }
+        assert next_parole(benched, count=1) == ["old"]
+
+    def test_zero_disables_parole(self):
+        from cdnprobe.bench import next_parole
+        assert next_parole({"A": {"since": "x"}}, count=0) == []
+
+    def test_empty_bench_has_nobody_to_release(self):
+        from cdnprobe.bench import next_parole
+        assert next_parole({}, count=3) == []
+
+    def test_asking_for_more_than_are_benched_is_fine(self):
+        from cdnprobe.bench import next_parole
+        assert next_parole({"A": {"since": "x"}}, count=5) == ["A"]
+
+    def test_round_robin_paces_itself_with_bench_size(self):
+        """Each benched CDN is re-tested every len(bench) rounds, not on a timer."""
+        from cdnprobe.bench import next_parole
+        benched = {
+            name: {"since": "2026-09-01T00:00:00", "last_checked": f"2026-09-0{i+1}T00:00:00"}
+            for i, name in enumerate(["A", "B", "C"])
+        }
+        assert next_parole(benched, count=1) == ["A"]  # checked longest ago

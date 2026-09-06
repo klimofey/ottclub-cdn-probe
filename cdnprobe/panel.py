@@ -181,9 +181,27 @@ class Panel:
             raise SystemExit(f"No playlist link found on {config.DOWNLOAD_URL}")
         return url
 
+    def _require_settings_page(self) -> None:
+        """Fails loudly if the settings select is not on the current page.
+
+        Reading it blind gives a bare "null has no options" from inside the
+        browser, which says nothing about the actual mistake: having navigated
+        elsewhere and never come back.
+        """
+        page = self.page
+        assert page is not None
+        if not page.evaluate(
+            "() => !!document.querySelector('select[name=cdn]')"
+        ):
+            raise RuntimeError(
+                f"the CDN select is not on {page.url} - call open_settings() "
+                f"before reading or changing the CDN"
+            )
+
     def cdn_options(self) -> list[CdnOption]:
         page = self.page
         assert page is not None
+        self._require_settings_page()
         raw = page.evaluate(
             """() => [...document.querySelectorAll('select[name=cdn] option')]
                  .map(o => [o.value, o.text.trim()])"""
@@ -193,6 +211,7 @@ class Panel:
     def current_cdn(self) -> CdnOption:
         page = self.page
         assert page is not None
+        self._require_settings_page()
         value, label = page.evaluate(
             """() => { const s = document.querySelector('select[name=cdn]');
                        const o = s.options[s.selectedIndex];

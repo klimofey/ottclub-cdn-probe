@@ -6,14 +6,22 @@ rather than on a single lucky reading.
 
 Runs as one Docker container with a dashboard.
 
+English · [Русский](README.ru.md)
+
 Several resellers run the same OTTClub panel — **ilook.tv** and
 **vipdrive.net** among them — so point `PANEL_URL` at whichever one your
 subscription is with.
 
-![tests](https://img.shields.io/badge/tests-88%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-94%20passing-brightgreen)
 ![docker](https://img.shields.io/badge/docker-1.32GB-blue)
 
 ![dashboard](dashboard.png)
+
+<details><summary>Dark theme</summary>
+
+![dashboard, dark theme](dashboard-dark.png)
+
+</details>
 
 ---
 
@@ -38,19 +46,69 @@ logs into — so the account you give it is the one that gets hammered.
 
 ---
 
-## Quick start
+## Install
+
+### With Docker Compose
 
 ```bash
-git clone https://github.com/<you>/cdnprobe.git
-cd cdnprobe
-cp .env.example .env      # put your test account's email and password in it
-docker compose up -d
+git clone https://github.com/klimofey/ottclub-cdn-probe
+cd ottclub-cdn-probe
+cp .env.example .env          # put your account email and password in it
+docker compose up -d          # builds and starts
 open http://localhost:8080
 ```
 
-Nothing else to configure. After logging in the container finds your playlist
-link and the list of CDNs by itself — **neither is hardcoded**, so a CDN the
-provider adds or removes tomorrow is picked up on the next round.
+```bash
+docker compose logs -f        # follow what it is doing
+docker compose restart        # apply changes to .env
+docker compose down           # stop, keeping the measurements
+docker compose down -v        # stop and wipe the history too
+```
+
+### With plain Docker
+
+```bash
+git clone https://github.com/klimofey/ottclub-cdn-probe
+cd ottclub-cdn-probe
+docker build -t cdnprobe .
+
+docker volume create cdnprobe-data
+
+docker run -d --name cdnprobe --restart unless-stopped \
+  -p 8080:8080 \
+  -e ILOOK_EMAIL='you@example.com' \
+  -e ILOOK_PASSWORD='your-password' \
+  -e ROUND_PAUSE=none \
+  -v cdnprobe-data:/data \
+  cdnprobe
+```
+
+Add whichever settings you want from the table below as further `-e` flags,
+for example measuring only at night and leaving the best CDN applied:
+
+```bash
+  -e ACTIVE_HOURS=01:00-07:00 -e TZ=Asia/Jerusalem -e AUTO_APPLY=true \
+```
+
+```bash
+docker logs -f cdnprobe               # follow what it is doing
+docker restart cdnprobe               # apply changed settings
+docker rm -f cdnprobe                 # stop, keeping the measurements
+docker volume rm cdnprobe-data        # wipe the history
+```
+
+The volume holds the measurement history and the cached browser session, so
+keep it across rebuilds - the multi-day statistics are the whole point.
+
+### One-off commands
+
+Useful without starting the daemon:
+
+```bash
+docker compose run --rm cdnprobe list    # playlist and CDNs the account offers
+docker compose run --rm cdnprobe once    # a single round, then exit
+docker compose run --rm cdnprobe stats   # print the table
+```
 
 ## Configuration
 
@@ -73,6 +131,7 @@ Everything is an environment variable; only the first two are required.
 | `MAX_ACTIVE_CDNS` | `10` | Keep at most this many in rotation; `0` disables |
 | `BENCH_MIN_ROUNDS` | `3` | Rounds a CDN must have before it can be benched |
 | `BENCH_BELOW_RATIO` | `2.0` | Median below this benches a CDN outright |
+| `PAROLE_PER_ROUND` | `1` | Benched CDNs re-tested per round; `0` disables |
 | `HISTORY_DAYS` | `30` | Drop measurements older than this |
 | `HISTORY_MAX_RECORDS` | `20000` | Hard cap on journal size |
 
@@ -109,8 +168,14 @@ tonight". Without it you cannot tell those apart.
 **New CDNs are always measured.** An option the provider adds tomorrow has no
 history, so there are no grounds to skip it.
 
-Unbenching is deliberately manual — an automatic retry would quietly undo the
-saving. The dashboard lists every benched CDN with the reason and a button.
+**Benched CDNs are not forgotten.** One per round — the one unchecked longest
+— is let out on parole and measured again. If it now passes the same test
+that benched it, it is released automatically; there is no point learning it
+recovered and keeping it out anyway. The round-robin paces itself: with nine
+on the bench each is re-tested roughly every nine rounds.
+
+The dashboard also offers a manual release button, for overriding the machine
+rather than waiting for it.
 
 ## How long a round takes
 

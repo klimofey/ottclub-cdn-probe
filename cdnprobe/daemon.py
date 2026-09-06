@@ -36,6 +36,9 @@ class Runner:
             "cdn": "",
             "cdn_index": 0,
             "cdn_total": 0,
+            "phase": "",
+            "on_parole": False,
+            "selected_cdn": "",
             "started_at": now(),
             "round_started_at": "",
             "last_round_finished_at": "",
@@ -107,7 +110,8 @@ class Runner:
                 self._set(status="error", detail=f"{type(error).__name__}: {error}")
                 time.sleep(60)
 
-            self._set(last_round_finished_at=now(), cdn="", cdn_index=0)
+            self._set(last_round_finished_at=now(), cdn="", cdn_index=0,
+                      phase="", on_parole=False)
             self._wait_between_rounds()
 
     def _wait_between_rounds(self) -> None:
@@ -156,14 +160,28 @@ class Runner:
                 return
             self._set(status="running", detail="")
 
-    def _update_bench(self, protected: str) -> None:
-        """Benches CDNs that have now failed often enough to judge."""
+    def _update_bench(self, protected: str, paroled: list[str]) -> None:
+        """Re-judges every CDN: bench the failing, release the recovered."""
         rows = stats.aggregate(storage.load())
-        added = bench.apply(bench.decide(rows, protected=protected))
-        for decision in added:
+        decisions = bench.decide(rows, protected=protected)
+        failing = {d.cdn for d in decisions}
+
+        # A paroled CDN that now passes the same test that benched it goes
+        # free: there is no point learning it recovered and keeping it out.
+        for cdn in paroled:
+            bench.mark_checked(cdn)
+        freed = bench.release([c for c in paroled if c not in failing])
+        for cdn in freed:
+            row = next((r for r in rows if r.cdn == cdn), None)
+            self._log(
+                f"released {cdn} after parole"
+                + (f": median now {row.median:.2f}x" if row else "")
+            )
+
+        for decision in bench.apply(decisions):
             self._log(
                 f"benched {decision.cdn}: {decision.reason} "
-                f"(over {decision.runs} rounds) - unbench it on the dashboard"
+                f"(over {decision.runs} rounds)"
             )
         current = bench.load()
         self._set(benched=[{"cdn": k, **v} for k, v in current.items()])
@@ -202,6 +220,10 @@ class Runner:
             self._set(playlist_found=True)
             self._log("playlist link discovered on the download page")
 
+            # playlist_url() navigated away to the download page, where the
+            # CDN select does not exist. Reading options without coming back
+            # would silently look at the wrong document.
+            panel.open_settings()
             all_options = panel.cdn_options()
             current = panel.current_cdn()
             # The first option is the provider's automatic choice. It is the
@@ -210,6 +232,14 @@ class Runner:
             protected = all_options[0].label if all_options else ""
             options = bench.active(all_options, protected)
             benched = bench.load()
+            # One benched CDN per round gets re-tested, oldest check first, so
+            # a CDN that recovers is not shut out forever.
+            paroled = bench.next_parole(benched)
+            if paroled:
+                options = options + [
+                    o for o in all_options if o.label in paroled
+                ]
+                self._log(f"parole this round: {', '.join(paroled)}")
             self._set(cdn_total=len(options), active_cdns=len(options),
                       benched=[{"cdn": k, **v} for k, v in benched.items()])
             skipped = len(all_options) - len(options)
@@ -237,16 +267,28 @@ class Runner:
                     self._await_window()
                     if self._stop.is_set():
                         return
-                    self._set(cdn=option.label, cdn_index=index)
-                    self._log(f"[{index}/{len(options)}] {option.label}")
+                    on_parole = option.label in paroled
+                    self._set(cdn=option.label, cdn_index=index,
+                              on_parole=on_parole, phase="starting")
+                    self._log(
+                        f"[{index}/{len(options)}] {option.label}"
+                        + (" (parole re-test)" if on_parole else "")
+                    )
 
                     confirmed = True
                     if option.value != selected:
+                        self._set(phase="switching",
+                                  detail=f"asking the panel for {option.label}")
                         if not self._apply(panel, option):
                             continue
                         selected = option.value
+                        self._set(selected_cdn=option.label, phase="propagating",
+                                  detail=f"{option.label} applied, waiting for the "
+                                         f"edge pool to turn over")
                         confirmed = self._await_switch(http, watch, before)
 
+                    self._set(phase="measuring",
+                              detail=f"measuring {option.label}")
                     results = probe_channels(
                         http, channels, config.DISCOVERY_ROUNDS,
                         on_event=lambda kind, msg: self._log(f"  {msg}"),
@@ -275,7 +317,7 @@ class Runner:
                     if measured:
                         before = measured
 
-            self._update_bench(protected)
+            self._update_bench(protected, paroled)
 
             if config.AUTO_APPLY:
                 self._auto_apply(panel, options)
@@ -293,9 +335,9 @@ class Runner:
                 self._log(f"  refused: {result.message or 'no reason given'}")
                 return False
             wait = result.cooldown_seconds
-            self._set(status="cooldown",
-                      detail=f"{option.label}: waiting {wait // 60}m for the "
-                             f"provider cooldown")
+            self._set(status="cooldown", phase="cooldown",
+                      detail=f"{option.label}: provider allows one switch every "
+                             f"~5 min, {wait // 60}m left")
             self._log(f"  cooldown, waiting {wait // 60}m "
                       f"(attempt {attempt}/{attempts})")
             if self._stop.wait(timeout=wait):

@@ -20,34 +20,57 @@ PAGE = """<!doctype html>
 <title>CDN probe</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E%F0%9F%93%A1%3C/text%3E%3C/svg%3E">
 <style>
+/* Light is the base; dark redefines only the tokens, so a colour is never
+   defined solely inside a media query. data-theme wins over both, which is
+   what makes the toggle work in either direction. */
 :root{
   --bg:#f6f7f9; --card:#fff; --ink:#12151a; --muted:#6b7280; --line:#e5e7eb;
   --good:#0f7b3f; --warn:#a86400; --bad:#b3261e; --accent:#1f5fd0;
+  --live:#1f5fd0; --live-bg:rgba(31,95,208,.10);
 }
-@media (prefers-color-scheme:dark){:root{
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#0f1115; --card:#171a21; --ink:#e8eaed; --muted:#9aa0aa; --line:#272b34;
   --good:#4ade80; --warn:#fbbf24; --bad:#f87171; --accent:#7aa2f7;
+  --live:#7aa2f7; --live-bg:rgba(122,162,247,.12);
 }}
+:root[data-theme="dark"]{
+  --bg:#0f1115; --card:#171a21; --ink:#e8eaed; --muted:#9aa0aa; --line:#272b34;
+  --good:#4ade80; --warn:#fbbf24; --bad:#f87171; --accent:#7aa2f7;
+  --live:#7aa2f7; --live-bg:rgba(122,162,247,.12);
+}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
   font:14px/1.5 ui-sans-serif,-apple-system,Segoe UI,Roboto,sans-serif}
-.wrap{max-width:1100px;margin:0 auto;padding:24px 16px 60px}
+.wrap{max-width:1140px;margin:0 auto;padding:24px 16px 60px}
+.top{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
 h1{font-size:20px;margin:0 0 4px}
 .sub{color:var(--muted);margin-bottom:20px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;
   padding:16px;margin-bottom:16px}
 .row{display:flex;flex-wrap:wrap;gap:12px}
-.stat{flex:1 1 150px}
+.stat{flex:1 1 140px}
 .stat .k{color:var(--muted);font-size:12px;text-transform:uppercase;
   letter-spacing:.04em}
 .stat .v{font-size:17px;font-weight:600;margin-top:2px}
 .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;
-  font-weight:600}
-.running{background:color-mix(in srgb,var(--accent) 18%,transparent);
+  font-weight:600;background:color-mix(in srgb,var(--muted) 18%,transparent);
+  color:var(--muted)}
+.pill.running,.pill.measuring{background:color-mix(in srgb,var(--accent) 18%,transparent);
   color:var(--accent)}
-.sleeping,.waiting,.cooldown{background:color-mix(in srgb,var(--warn) 20%,transparent);
+.pill.sleeping,.pill.waiting,.pill.cooldown,.pill.propagating,.pill.switching,
+.pill\\.outside{background:color-mix(in srgb,var(--warn) 20%,transparent);
   color:var(--warn)}
-.error{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+.pill.error{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+.now{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px;
+  padding:12px;border-radius:8px;background:var(--live-bg);
+  border:1px solid color-mix(in srgb,var(--live) 30%,transparent)}
+.now .dot{width:8px;height:8px;border-radius:50%;background:var(--live);
+  animation:pulse 1.4s ease-in-out infinite;flex:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.now b{color:var(--live)}
+.now .what{color:var(--muted)}
+.tag{font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;
+  border:1px solid var(--warn);color:var(--warn)}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
 th,td{text-align:right;padding:7px 8px;border-bottom:1px solid var(--line)}
 th:first-child,td:first-child,th:nth-child(2),td:nth-child(2){text-align:left}
@@ -56,42 +79,52 @@ th{color:var(--muted);font-size:12px;text-transform:uppercase;
 th[data-key]{cursor:pointer;user-select:none;white-space:nowrap}
 th[data-key]:hover{color:var(--ink)}
 th[data-key]::after{content:'';opacity:.35;margin-left:4px}
-th[data-key]:hover::after{content:'\2195'}
+th[data-key]:hover::after{content:'\\2195'}
 th.sorted{color:var(--ink)}
 th.sorted::after,th.sorted:hover::after{content:attr(data-arrow);opacity:1}
 tbody tr:last-child td{border-bottom:0}
+tr.is-live td{background:var(--live-bg)}
+tr.is-live td:nth-child(2){font-weight:700;color:var(--live)}
+tr.is-benched td{opacity:.45}
 .v-solid{color:var(--good);font-weight:600}
 .v-jumpy{color:var(--warn)}
 .v-drops{color:var(--bad)}
 .v-thin{color:var(--muted)}
 .pick{border-left:3px solid var(--good);padding-left:12px;margin-top:14px}
 button{font:inherit;font-weight:600;padding:8px 16px;border-radius:8px;
-  border:1px solid var(--line);background:var(--accent);color:#fff;
-  cursor:pointer}
+  border:1px solid var(--line);background:var(--accent);color:#fff;cursor:pointer}
 button:disabled{opacity:.5;cursor:default}
+button.ghost{background:transparent;color:var(--muted);border-color:var(--line);
+  padding:6px 12px;font-size:13px}
+button.ghost:hover{color:var(--ink)}
 pre{margin:0;max-height:280px;overflow:auto;font-size:12px;color:var(--muted);
   white-space:pre-wrap}
 .scroll{overflow-x:auto}
 .legend{color:var(--muted);font-size:12px;margin-top:10px}
-.benched{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
-  padding:7px 0;border-bottom:1px solid var(--line)}
+.benched{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 0;
+  border-bottom:1px solid var(--line)}
 .benched:last-child{border-bottom:0}
 .benched .name{font-weight:600;min-width:180px}
 .benched .why{color:var(--muted);font-size:12px;flex:1}
 .benched button{padding:4px 12px;font-size:12px;background:transparent;
   color:var(--accent);border-color:var(--accent)}
-tr.is-benched td{opacity:.45}
 </style></head><body><div class="wrap">
-<h1>CDN probe</h1>
-<div class="sub">Which ilook.tv CDN actually keeps the stream fed</div>
+
+<div class="top">
+  <div>
+    <h1>CDN probe</h1>
+    <div class="sub">Which CDN actually keeps the stream fed</div>
+  </div>
+  <button class="ghost" id="theme">theme: system</button>
+</div>
 
 <div class="card">
   <div class="row">
     <div class="stat"><div class="k">Status</div>
       <div class="v"><span id="status" class="pill">-</span></div></div>
     <div class="stat"><div class="k">Round</div><div class="v" id="round">-</div></div>
-    <div class="stat"><div class="k">Now testing</div>
-      <div class="v" id="cdn">-</div></div>
+    <div class="stat"><div class="k">Selected CDN</div>
+      <div class="v" id="selected">-</div></div>
     <div class="stat"><div class="k">Between rounds</div>
       <div class="v" id="pause">-</div></div>
     <div class="stat"><div class="k">Active hours</div>
@@ -101,6 +134,15 @@ tr.is-benched td{opacity:.45}
     <div class="stat"><div class="k">Measurements</div>
       <div class="v" id="total">-</div></div>
   </div>
+
+  <div class="now" id="now" hidden>
+    <span class="dot"></span>
+    <b id="now-cdn">-</b>
+    <span id="now-parole" class="tag" hidden>parole re-test</span>
+    <span class="what" id="now-what"></span>
+    <span class="what" id="now-pos" style="margin-left:auto"></span>
+  </div>
+
   <div class="sub" id="detail" style="margin:12px 0 0"></div>
   <div style="margin-top:12px"><button id="run">Run round now</button></div>
 </div>
@@ -126,29 +168,50 @@ tr.is-benched td{opacity:.45}
     WORST the worst round ever seen, where streams actually break &middot;
     SPREAD standard deviation across rounds &middot;
     RISK mean share of segments with too little margin.
+    Click any column to sort.
   </div>
 </div>
 
 <div class="card" id="bench-card" hidden>
-  <div class="k" style="color:var(--muted);font-size:12px;text-transform:uppercase;
-    letter-spacing:.04em;margin-bottom:8px">Benched &mdash; not measured until you say so</div>
+  <div style="color:var(--muted);font-size:12px;text-transform:uppercase;
+    letter-spacing:.04em;margin-bottom:8px">Benched &mdash; skipped to keep rounds short</div>
   <div id="bench"></div>
-  <div class="legend">Benched CDNs are skipped so rounds stay short. New CDNs
-    the provider adds are always measured; the account's automatic option is
-    never benched.</div>
+  <div class="legend">One benched CDN is re-tested each round, oldest check
+    first, and released automatically if it now passes. New CDNs the provider
+    adds are always measured; the account\'s automatic option is never benched.</div>
 </div>
 
 <div class="card"><pre id="log"></pre></div>
 </div>
 <script>
+const THEMES = ['system', 'light', 'dark'];
+let theme = localStorage.getItem('theme') || 'system';
+function applyTheme(){
+  if (theme === 'system') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', theme);
+  document.getElementById('theme').textContent = 'theme: ' + theme;
+  localStorage.setItem('theme', theme);
+}
+document.getElementById('theme').onclick = () => {
+  theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+  applyTheme();
+};
+applyTheme();
+
 const cls = v => v === 'solid' ? 'v-solid'
   : v === 'good but jumpy' ? 'v-jumpy'
   : v === 'drops out' ? 'v-drops' : 'v-thin';
 
-let rows = [];
-let benched = new Set();
-// Default order comes from the server: median first, ties broken by the
-// worst round. Clicking a header overrides it until the page is reloaded.
+const PHASES = {
+  switching:   'asking the panel to switch',
+  cooldown:    'waiting out the provider cooldown',
+  propagating: 'switched, waiting for the edge pool to turn over',
+  measuring:   'downloading segments from every edge',
+  starting:    'starting',
+};
+
+let rows = [], benched = new Set(), live = '';
+// Default order is the server\'s: median first, ties broken by worst round.
 let sortKey = null, sortDir = -1;
 
 function render(){
@@ -158,49 +221,60 @@ function render(){
     const cmp = typeof x === 'string' ? x.localeCompare(y, 'en') : x - y;
     return cmp * sortDir;
   });
-  document.getElementById('rows').innerHTML = data.map((x,i) => `
-    <tr class="${benched.has(x.cdn) ? 'is-benched' : ''}">
-    <td>${i+1}</td><td>${x.cdn}</td><td>${x.runs}</td>
-    <td>${x.median.toFixed(2)}x</td><td>${x.worst_run.toFixed(2)}x</td>
-    <td>${x.best_run.toFixed(2)}x</td><td>${x.spread.toFixed(2)}</td>
-    <td>${(x.risk_share*100).toFixed(0)}%</td>
-    <td style="text-align:left" class="${cls(x.verdict)}">${x.verdict}</td></tr>`).join('');
+  document.getElementById('rows').innerHTML = data.map((x,i) => {
+    const klass = [x.cdn === live ? 'is-live' : '',
+                   benched.has(x.cdn) ? 'is-benched' : ''].filter(Boolean).join(' ');
+    return `<tr class="${klass}"><td>${i+1}</td><td>${x.cdn}</td><td>${x.runs}</td>
+      <td>${x.median.toFixed(2)}x</td><td>${x.worst_run.toFixed(2)}x</td>
+      <td>${x.best_run.toFixed(2)}x</td><td>${x.spread.toFixed(2)}</td>
+      <td>${(x.risk_share*100).toFixed(0)}%</td>
+      <td style="text-align:left" class="${cls(x.verdict)}">${x.verdict}</td></tr>`;
+  }).join('');
 }
 
 document.querySelectorAll('th[data-key]').forEach(th => {
   th.onclick = () => {
     const key = th.dataset.key;
-    // Same column toggles direction; a new column starts descending for
-    // numbers and ascending for text, which is what people expect.
     if (sortKey === key) sortDir = -sortDir;
     else { sortKey = key; sortDir = (key === 'cdn' || key === 'verdict') ? 1 : -1; }
     document.querySelectorAll('th[data-key]').forEach(o => {
-      o.classList.remove('sorted');
-      o.removeAttribute('data-arrow');
+      o.classList.remove('sorted'); o.removeAttribute('data-arrow');
     });
     th.classList.add('sorted');
-    th.setAttribute('data-arrow', sortDir === 1 ? '\u2191' : '\u2193');
+    th.setAttribute('data-arrow', sortDir === 1 ? '\\u2191' : '\\u2193');
     render();
   };
 });
 
 async function refresh(){
-  const r = await fetch('api/state');
-  const d = await r.json();
+  const d = await (await fetch('api/state')).json();
   const s = d.state;
+
   const st = document.getElementById('status');
-  st.textContent = s.status;
-  st.className = 'pill ' + s.status;
+  st.textContent = s.phase || s.status;
+  st.className = 'pill ' + (s.phase || s.status).replace(/\\s+/g, '-');
+
   document.getElementById('round').textContent = s.round || '-';
-  document.getElementById('cdn').textContent =
-    s.cdn ? `${s.cdn} (${s.cdn_index}/${s.cdn_total})` : '-';
+  document.getElementById('selected').textContent = s.selected_cdn || '-';
   document.getElementById('pause').textContent = s.pause;
-  document.getElementById('total').textContent = d.measurements;
   document.getElementById('hours').textContent = s.active_hours;
   document.getElementById('auto').textContent = s.auto_apply
-    ? (s.applied_cdn ? 'on \u2192 ' + s.applied_cdn : 'on') : 'off';
+    ? (s.applied_cdn ? 'on \\u2192 ' + s.applied_cdn : 'on') : 'off';
+  document.getElementById('total').textContent = d.measurements;
   document.getElementById('detail').textContent = s.detail || '';
   document.getElementById('log').textContent = s.log.join('\\n');
+
+  live = s.cdn || '';
+  const now = document.getElementById('now');
+  now.hidden = !live;
+  if (live) {
+    document.getElementById('now-cdn').textContent = live;
+    document.getElementById('now-parole').hidden = !s.on_parole;
+    document.getElementById('now-what').textContent =
+      PHASES[s.phase] || s.detail || '';
+    document.getElementById('now-pos').textContent =
+      s.cdn_total ? `${s.cdn_index} of ${s.cdn_total}` : '';
+  }
 
   rows = d.stats;
   benched = new Set(d.benched.map(b => b.cdn));
@@ -211,7 +285,8 @@ async function refresh(){
   document.getElementById('bench').innerHTML = d.benched.map(b => `
     <div class="benched">
       <span class="name">${b.cdn}</span>
-      <span class="why">${b.why || b.reason} &middot; since ${b.since.slice(5,16).replace('T',' ')}</span>
+      <span class="why">${b.reason} &middot; since ${b.since.slice(5,16).replace('T',' ')}
+        ${b.checks ? '&middot; re-tested ' + b.checks + 'x' : ''}</span>
       <button data-cdn="${b.cdn}">Unbench</button>
     </div>`).join('');
   document.querySelectorAll('.benched button').forEach(btn => {
@@ -236,7 +311,7 @@ document.getElementById('run').onclick = async e => {
   await fetch('api/run', {method:'POST'});
   setTimeout(() => { e.target.disabled = false; refresh(); }, 1500);
 };
-refresh(); setInterval(refresh, 5000);
+refresh(); setInterval(refresh, 3000);
 </script></body></html>
 """
 

@@ -84,6 +84,11 @@ BENCH_MIN_ROUNDS = int(os.environ.get("BENCH_MIN_ROUNDS", "3"))
 # Median below this benches a CDN outright, regardless of the cap.
 BENCH_BELOW_RATIO = float(os.environ.get("BENCH_BELOW_RATIO", "2.0"))
 
+# Benched CDNs are re-tested one per round, oldest check first, so a CDN that
+# recovers is not excluded forever. Costs about five minutes a round. 0 turns
+# parole off and makes benching permanent until released by hand.
+PAROLE_PER_ROUND = int(os.environ.get("PAROLE_PER_ROUND", "1"))
+
 # --- active hours ----------------------------------------------------------
 
 # Rounds only run inside this window, so the account can be watched the rest

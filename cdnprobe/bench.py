@@ -13,8 +13,14 @@ Two safeguards make that safe rather than self-fulfilling:
   choice) is never benched. It is the reference point that tells apart "this
   CDN is bad" from "the whole network is bad tonight".
 
-Unbenching is manual by design: an automatic retry would quietly undo the
-saving. The dashboard offers a button.
+Benched CDNs are not forgotten. One per round is let out on parole - the one
+unchecked longest - and measured again. If it now passes the same test that
+benched it, it is released automatically; there would be no point learning it
+recovered and keeping it out anyway. The round-robin paces itself: with nine
+on the bench each gets re-tested roughly every nine rounds.
+
+The dashboard also offers a manual release button, for when you want to
+override the machine rather than wait for it.
 """
 
 from __future__ import annotations
@@ -49,6 +55,44 @@ def save(benched: dict[str, dict]) -> None:
     config.BENCH_FILE.write_text(
         json.dumps(benched, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+
+
+def next_parole(benched: dict[str, dict], count: int | None = None) -> list[str]:
+    """The benched CDNs due for a re-test: those unchecked longest.
+
+    Round-robin rather than a timer, so the interval scales with how many are
+    benched instead of flooding a round when the bench is crowded.
+    """
+    count = config.PAROLE_PER_ROUND if count is None else count
+    if count <= 0 or not benched:
+        return []
+    order = sorted(
+        benched.items(),
+        key=lambda item: (item[1].get("last_checked") or item[1].get("since", "")),
+    )
+    return [name for name, _ in order[:count]]
+
+
+def mark_checked(cdn: str) -> None:
+    benched = load()
+    if cdn not in benched:
+        return
+    benched[cdn]["last_checked"] = datetime.now(timezone.utc).isoformat(
+        timespec="seconds"
+    )
+    benched[cdn]["checks"] = int(benched[cdn].get("checks", 0)) + 1
+    save(benched)
+
+
+def release(cdns: list[str]) -> list[str]:
+    """Lets out those that no longer meet the bench criteria."""
+    benched = load()
+    freed = [cdn for cdn in cdns if cdn in benched]
+    for cdn in freed:
+        del benched[cdn]
+    if freed:
+        save(benched)
+    return freed
 
 
 def unbench(cdn: str) -> bool:
