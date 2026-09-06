@@ -12,7 +12,7 @@ Several resellers run the same OTTClub panel — **ilook.tv** and
 **vipdrive.net** among them — so point `PANEL_URL` at whichever one your
 subscription is with.
 
-![tests](https://img.shields.io/badge/tests-136%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-140%20passing-brightgreen)
 ![docker](https://img.shields.io/badge/docker-1.32GB-blue)
 
 ![dashboard](dashboard.png)
@@ -102,9 +102,9 @@ Everything is an environment variable; only the first two are required.
 | `CHANNELS` | `2` | Channels sampled per round |
 | `EDGE_CAP_SECONDS` | `3.0` | Per-edge download cap |
 | `EDGE_CAP_MB` | `6` | Per-edge byte cap |
-| `MAX_ACTIVE_CDNS` | `10` | Keep at most this many in rotation; `0` disables |
+| `MAX_ACTIVE_CDNS` | `0` | Cap the rotation at this many; `0` benches nothing |
 | `BENCH_MIN_ROUNDS` | `3` | Rounds a CDN must have before it can be benched |
-| `BENCH_BELOW_RATIO` | `2.0` | Median below this benches a CDN outright |
+| `BENCH_BELOW_RATIO` | `0` | Median below this benches a CDN outright; `0` disables |
 | `PAROLE_PER_ROUND` | `1` | Benched CDNs re-tested per round; `0` disables |
 | `HISTORY_DAYS` | `30` | Drop measurements older than this |
 | `HISTORY_MAX_RECORDS` | `20000` | Hard cap on journal size |
@@ -198,6 +198,12 @@ than hidden — "not measured yet" is information, and hiding it would read as
 a verdict.
 
 ## Benching the hopeless ones
+
+**Off by default.** It acts on a verdict, and a verdict is only as good as
+the measurements under it — excluding a CDN wrongly costs far more than
+measuring one needlessly. Turn it on with `MAX_ACTIVE_CDNS` once the data has
+earned trust. Turning it back off also releases whoever is already benched.
+
 
 A round costs about five minutes per CDN, so measuring twenty of them takes
 hours. Once a CDN has repeatedly failed there is little point paying that

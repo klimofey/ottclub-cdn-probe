@@ -73,16 +73,24 @@ RATIO_GOOD = float(os.environ.get("RATIO_GOOD", "3.0"))
 
 # --- benching --------------------------------------------------------------
 
-# Rounds cost about five minutes per CDN, so dropping hopeless ones lets the
-# rest be sampled twice as often. Set MAX_ACTIVE_CDNS to 0 to bench nothing.
-MAX_ACTIVE_CDNS = int(os.environ.get("MAX_ACTIVE_CDNS", "10"))
+# Benching is OFF by default. It shortens rounds by dropping hopeless CDNs,
+# but it acts on a verdict, and a verdict is only as good as the measurements
+# under it - excluding a CDN wrongly is far more costly than measuring one
+# needlessly. Turn it on once the data is trustworthy.
+# Set MAX_ACTIVE_CDNS to a number to cap the rotation; 0 caps nothing.
+MAX_ACTIVE_CDNS = int(os.environ.get("MAX_ACTIVE_CDNS", "0"))
 
 # A CDN must have this many rounds before it can be benched. One bad evening
 # is not evidence: a CDN measured here went 1.81x one hour and 7.36x the next.
 BENCH_MIN_ROUNDS = int(os.environ.get("BENCH_MIN_ROUNDS", "3"))
 
-# Median below this benches a CDN outright, regardless of the cap.
-BENCH_BELOW_RATIO = float(os.environ.get("BENCH_BELOW_RATIO", "2.0"))
+# Median below this benches a CDN outright, regardless of the cap. 0 disables.
+BENCH_BELOW_RATIO = float(os.environ.get("BENCH_BELOW_RATIO", "0"))
+
+
+def benching_enabled() -> bool:
+    """Whether anything can be benched at all."""
+    return MAX_ACTIVE_CDNS > 0 or BENCH_BELOW_RATIO > 0
 
 # Benched CDNs are re-tested one per round, oldest check first, so a CDN that
 # recovers is not excluded forever. Costs about five minutes a round. 0 turns

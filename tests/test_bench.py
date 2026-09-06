@@ -145,3 +145,30 @@ class TestParole:
             for i, name in enumerate(["A", "B", "C"])
         }
         assert next_parole(benched, count=1) == ["A"]  # checked longest ago
+
+
+class TestDisabled:
+    """Off by default: a wrong exclusion costs far more than a wasted round."""
+
+    def test_both_knobs_at_zero_means_disabled(self, monkeypatch):
+        from cdnprobe import config
+        monkeypatch.setattr(config, "MAX_ACTIVE_CDNS", 0)
+        monkeypatch.setattr(config, "BENCH_BELOW_RATIO", 0)
+        assert config.benching_enabled() is False
+
+    def test_a_cap_alone_enables_it(self, monkeypatch):
+        from cdnprobe import config
+        monkeypatch.setattr(config, "MAX_ACTIVE_CDNS", 10)
+        monkeypatch.setattr(config, "BENCH_BELOW_RATIO", 0)
+        assert config.benching_enabled() is True
+
+    def test_a_floor_alone_enables_it(self, monkeypatch):
+        from cdnprobe import config
+        monkeypatch.setattr(config, "MAX_ACTIVE_CDNS", 0)
+        monkeypatch.setattr(config, "BENCH_BELOW_RATIO", 2.0)
+        assert config.benching_enabled() is True
+
+    def test_nothing_is_benched_when_disabled(self):
+        rows = [Row("Terrible", 0.4, runs=20)]
+        assert decide(rows, protected=AUTO, min_rounds=3, below=0,
+                      max_active=0) == []

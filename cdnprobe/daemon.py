@@ -176,6 +176,8 @@ class Runner:
 
     def _update_bench(self, protected: str, paroled: list[str]) -> None:
         """Re-judges every CDN: bench the failing, release the recovered."""
+        if not config.benching_enabled():
+            return
         rows = stats.aggregate(storage.load())
         decisions = bench.decide(rows, protected=protected)
         failing = {d.cdn for d in decisions}
@@ -245,8 +247,17 @@ class Runner:
             # bad", so it is never benched.
             protected = all_options[0].label if all_options else ""
             original = [o.label for o in all_options]
-            options = bench.active(all_options, protected)
-            benched = bench.load()
+            if config.benching_enabled():
+                options = bench.active(all_options, protected)
+                benched = bench.load()
+            else:
+                # Turning benching off must also let out whoever is already
+                # sitting on the bench, or the switch only half works.
+                options = list(all_options)
+                if bench.load():
+                    freed = bench.release(list(bench.load()))
+                    self._log(f"benching is off, released: {', '.join(freed)}")
+                benched = {}
 
             # Least-measured first. A round always restarting at the top of
             # the list means any interruption - an update, a crash, a reboot -
