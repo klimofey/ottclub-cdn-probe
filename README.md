@@ -10,7 +10,7 @@ Several resellers run the same OTTClub panel — **ilook.tv** and
 **vipdrive.net** among them — so point `PANEL_URL` at whichever one your
 subscription is with.
 
-![tests](https://img.shields.io/badge/tests-76%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-88%20passing-brightgreen)
 ![docker](https://img.shields.io/badge/docker-1.32GB-blue)
 
 ![dashboard](dashboard.png)
@@ -70,6 +70,9 @@ Everything is an environment variable; only the first two are required.
 | `CHANNELS` | `2` | Channels sampled per round |
 | `EDGE_CAP_SECONDS` | `3.0` | Per-edge download cap |
 | `EDGE_CAP_MB` | `6` | Per-edge byte cap |
+| `MAX_ACTIVE_CDNS` | `10` | Keep at most this many in rotation; `0` disables |
+| `BENCH_MIN_ROUNDS` | `3` | Rounds a CDN must have before it can be benched |
+| `BENCH_BELOW_RATIO` | `2.0` | Median below this benches a CDN outright |
 | `HISTORY_DAYS` | `30` | Drop measurements older than this |
 | `HISTORY_MAX_RECORDS` | `20000` | Hard cap on journal size |
 
@@ -86,9 +89,33 @@ rather than the best median.
 the dashboard. Handy if you only want to measure during the hours you
 actually watch.
 
+## Benching the hopeless ones
+
+A round costs about five minutes per CDN, so measuring twenty of them takes
+hours. Once a CDN has repeatedly failed there is little point paying that
+price again — benching it lets the rest be sampled twice as often, which is
+what actually sharpens the statistics.
+
+Three rules keep that from becoming self-fulfilling:
+
+**A CDN needs several rounds before it can be benched.** One bad evening is
+not evidence. A CDN measured here read 1.81x one hour and 7.36x the next; a
+hair-trigger rule would have benched one of the best options.
+
+**The account's automatic option is never benched.** It is the reference
+point that separates "this CDN is bad" from "the whole network is bad
+tonight". Without it you cannot tell those apart.
+
+**New CDNs are always measured.** An option the provider adds tomorrow has no
+history, so there are no grounds to skip it.
+
+Unbenching is deliberately manual — an automatic retry would quietly undo the
+saving. The dashboard lists every benched CDN with the reason and a button.
+
 ## How long a round takes
 
-Measured on a live account: **1.6 to 2.5 hours** for a full pass over 19 CDNs.
+Measured on a live account: **1.6 to 2.5 hours** for a full pass over 19
+CDNs, or about **50 minutes** once benching has trimmed the rotation to ten.
 
 The limit is not the measuring, which takes about two minutes per CDN. It is
 the provider, which accepts a CDN change roughly **once every five minutes**;

@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 HISTORY_FILE = DATA_DIR / "history.jsonl"
+BENCH_FILE = DATA_DIR / "bench.json"
 STATE_FILE = DATA_DIR / "session.json"
 
 # Several resellers run the same OTTClub panel - ilook.tv and vipdrive.net
@@ -69,6 +70,19 @@ PROPAGATION_POLL = 10
 # Streams below this margin stall on any network hiccup.
 RATIO_DANGER = float(os.environ.get("RATIO_DANGER", "2.0"))
 RATIO_GOOD = float(os.environ.get("RATIO_GOOD", "3.0"))
+
+# --- benching --------------------------------------------------------------
+
+# Rounds cost about five minutes per CDN, so dropping hopeless ones lets the
+# rest be sampled twice as often. Set MAX_ACTIVE_CDNS to 0 to bench nothing.
+MAX_ACTIVE_CDNS = int(os.environ.get("MAX_ACTIVE_CDNS", "10"))
+
+# A CDN must have this many rounds before it can be benched. One bad evening
+# is not evidence: a CDN measured here went 1.81x one hour and 7.36x the next.
+BENCH_MIN_ROUNDS = int(os.environ.get("BENCH_MIN_ROUNDS", "3"))
+
+# Median below this benches a CDN outright, regardless of the cap.
+BENCH_BELOW_RATIO = float(os.environ.get("BENCH_BELOW_RATIO", "2.0"))
 
 # --- active hours ----------------------------------------------------------
 

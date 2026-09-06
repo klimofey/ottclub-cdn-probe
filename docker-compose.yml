@@ -27,6 +27,13 @@ services:
       # Put the account on the best proven CDN when a round ends.
       AUTO_APPLY: ${AUTO_APPLY:-false}
 
+      # Stop measuring CDNs that have repeatedly failed, so rounds stay
+      # short and the plausible ones get sampled twice as often.
+      # 0 disables the cap. Unbenching is manual, from the dashboard.
+      MAX_ACTIVE_CDNS: ${MAX_ACTIVE_CDNS:-10}
+      BENCH_MIN_ROUNDS: ${BENCH_MIN_ROUNDS:-3}
+      BENCH_BELOW_RATIO: ${BENCH_BELOW_RATIO:-2.0}
+
       # How long measurements are kept. Age matters more than disk here:
       # CDN quality drifts, so stale rounds blur the median.
       HISTORY_DAYS: ${HISTORY_DAYS:-30}

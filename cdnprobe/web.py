@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from . import config, storage
+from . import bench, config, storage
 from .daemon import Runner
 from .stats import aggregate, best
 
@@ -73,6 +73,14 @@ pre{margin:0;max-height:280px;overflow:auto;font-size:12px;color:var(--muted);
   white-space:pre-wrap}
 .scroll{overflow-x:auto}
 .legend{color:var(--muted);font-size:12px;margin-top:10px}
+.benched{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:7px 0;border-bottom:1px solid var(--line)}
+.benched:last-child{border-bottom:0}
+.benched .name{font-weight:600;min-width:180px}
+.benched .why{color:var(--muted);font-size:12px;flex:1}
+.benched button{padding:4px 12px;font-size:12px;background:transparent;
+  color:var(--accent);border-color:var(--accent)}
+tr.is-benched td{opacity:.45}
 </style></head><body><div class="wrap">
 <h1>CDN probe</h1>
 <div class="sub">Which ilook.tv CDN actually keeps the stream fed</div>
@@ -121,6 +129,15 @@ pre{margin:0;max-height:280px;overflow:auto;font-size:12px;color:var(--muted);
   </div>
 </div>
 
+<div class="card" id="bench-card" hidden>
+  <div class="k" style="color:var(--muted);font-size:12px;text-transform:uppercase;
+    letter-spacing:.04em;margin-bottom:8px">Benched &mdash; not measured until you say so</div>
+  <div id="bench"></div>
+  <div class="legend">Benched CDNs are skipped so rounds stay short. New CDNs
+    the provider adds are always measured; the account's automatic option is
+    never benched.</div>
+</div>
+
 <div class="card"><pre id="log"></pre></div>
 </div>
 <script>
@@ -129,6 +146,7 @@ const cls = v => v === 'solid' ? 'v-solid'
   : v === 'drops out' ? 'v-drops' : 'v-thin';
 
 let rows = [];
+let benched = new Set();
 // Default order comes from the server: median first, ties broken by the
 // worst round. Clicking a header overrides it until the page is reloaded.
 let sortKey = null, sortDir = -1;
@@ -141,7 +159,8 @@ function render(){
     return cmp * sortDir;
   });
   document.getElementById('rows').innerHTML = data.map((x,i) => `
-    <tr><td>${i+1}</td><td>${x.cdn}</td><td>${x.runs}</td>
+    <tr class="${benched.has(x.cdn) ? 'is-benched' : ''}">
+    <td>${i+1}</td><td>${x.cdn}</td><td>${x.runs}</td>
     <td>${x.median.toFixed(2)}x</td><td>${x.worst_run.toFixed(2)}x</td>
     <td>${x.best_run.toFixed(2)}x</td><td>${x.spread.toFixed(2)}</td>
     <td>${(x.risk_share*100).toFixed(0)}%</td>
@@ -184,7 +203,26 @@ async function refresh(){
   document.getElementById('log').textContent = s.log.join('\\n');
 
   rows = d.stats;
+  benched = new Set(d.benched.map(b => b.cdn));
   render();
+
+  const card = document.getElementById('bench-card');
+  card.hidden = d.benched.length === 0;
+  document.getElementById('bench').innerHTML = d.benched.map(b => `
+    <div class="benched">
+      <span class="name">${b.cdn}</span>
+      <span class="why">${b.why || b.reason} &middot; since ${b.since.slice(5,16).replace('T',' ')}</span>
+      <button data-cdn="${b.cdn}">Unbench</button>
+    </div>`).join('');
+  document.querySelectorAll('.benched button').forEach(btn => {
+    btn.onclick = async () => {
+      btn.disabled = true;
+      await fetch('api/unbench', {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({cdn: btn.dataset.cdn})});
+      refresh();
+    };
+  });
 
   document.getElementById('pick').innerHTML = d.pick
     ? `<div class="pick"><b>Pick: ${d.pick.cdn}</b> &mdash; median
@@ -229,15 +267,29 @@ class Handler(BaseHTTPRequestHandler):
                 "stats": [s.as_dict() for s in table],
                 "pick": pick.as_dict() if pick else None,
                 "measurements": len(records),
+                "benched": [
+                    {"cdn": name, **info} for name, info in bench.load().items()
+                ],
             }
             self._send(200, json.dumps(payload).encode("utf-8"), "application/json")
         else:
             self._send(404, b"not found", "text/plain")
 
     def do_POST(self) -> None:
-        if self.path.rstrip("/") == "/api/run":
+        path = self.path.rstrip("/")
+        if path == "/api/run":
             started = self.runner.request_run()
-            self._send(200, json.dumps({"queued": started}).encode(), "application/json")
+            self._send(200, json.dumps({"queued": started}).encode(),
+                       "application/json")
+        elif path == "/api/unbench":
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                payload = json.loads(self.rfile.read(length) or b"{}")
+            except json.JSONDecodeError:
+                payload = {}
+            removed = bench.unbench(str(payload.get("cdn", "")))
+            self._send(200, json.dumps({"unbenched": removed}).encode(),
+                       "application/json")
         else:
             self._send(404, b"not found", "text/plain")
 

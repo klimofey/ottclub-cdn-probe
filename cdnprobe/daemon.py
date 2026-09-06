@@ -11,7 +11,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from . import config, stats, storage
+from . import bench, config, stats, storage
 from .panel import CdnOption, Panel
 from .parsing import network_of
 from .stream import balancer_of, client, discover_channel, fetch_channels, probe_channels
@@ -44,6 +44,8 @@ class Runner:
             "active_hours": config.ACTIVE_HOURS or "always",
             "auto_apply": config.AUTO_APPLY,
             "applied_cdn": "",
+            "benched": [],
+            "active_cdns": 0,
             "playlist_found": False,
             "balancer": "",
             "channels": 0,
@@ -154,6 +156,18 @@ class Runner:
                 return
             self._set(status="running", detail="")
 
+    def _update_bench(self, protected: str) -> None:
+        """Benches CDNs that have now failed often enough to judge."""
+        rows = stats.aggregate(storage.load())
+        added = bench.apply(bench.decide(rows, protected=protected))
+        for decision in added:
+            self._log(
+                f"benched {decision.cdn}: {decision.reason} "
+                f"(over {decision.runs} rounds) - unbench it on the dashboard"
+            )
+        current = bench.load()
+        self._set(benched=[{"cdn": k, **v} for k, v in current.items()])
+
     def _auto_apply(self, panel: Panel, options: list[CdnOption]) -> None:
         """Leaves the account on the CDN that has proven itself.
 
@@ -188,10 +202,22 @@ class Runner:
             self._set(playlist_found=True)
             self._log("playlist link discovered on the download page")
 
-            options = panel.cdn_options()
+            all_options = panel.cdn_options()
             current = panel.current_cdn()
-            self._set(cdn_total=len(options))
-            self._log(f"{len(options)} CDNs offered by the account")
+            # The first option is the provider's automatic choice. It is the
+            # reference that tells "this CDN is bad" apart from "tonight is
+            # bad", so it is never benched.
+            protected = all_options[0].label if all_options else ""
+            options = bench.active(all_options, protected)
+            benched = bench.load()
+            self._set(cdn_total=len(options), active_cdns=len(options),
+                      benched=[{"cdn": k, **v} for k, v in benched.items()])
+            skipped = len(all_options) - len(options)
+            self._log(
+                f"{len(all_options)} CDNs offered"
+                + (f", {skipped} benched, {len(options)} to measure" if skipped
+                   else "")
+            )
 
             with client() as http:
                 channels = fetch_channels(http, playlist_url)[: config.CHANNELS]
@@ -248,6 +274,8 @@ class Runner:
                     )
                     if measured:
                         before = measured
+
+            self._update_bench(protected)
 
             if config.AUTO_APPLY:
                 self._auto_apply(panel, options)
