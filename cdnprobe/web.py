@@ -7,11 +7,12 @@ the image, so this is http.server with a hand-written handler.
 from __future__ import annotations
 
 import json
+from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from . import bench, config, storage
 from .daemon import Runner
-from .stats import aggregate, best
+from .stats import PARTS, aggregate, best, coverage
 
 PAGE = """<!doctype html>
 <html lang="en"><head>
@@ -39,6 +40,9 @@ PAGE = """<!doctype html>
   --live:#7aa2f7; --live-bg:rgba(122,162,247,.12);
 }
 *{box-sizing:border-box}
+/* Author styles beat the browser's [hidden] rule regardless of specificity,
+   so a class with display:flex would keep a hidden element visible. */
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);
   font:14px/1.5 ui-sans-serif,-apple-system,Segoe UI,Roboto,sans-serif}
 .wrap{max-width:1140px;margin:0 auto;padding:24px 16px 60px}
@@ -100,6 +104,13 @@ button.ghost:hover{color:var(--ink)}
 pre{margin:0;max-height:280px;overflow:auto;font-size:12px;color:var(--muted);
   white-space:pre-wrap}
 .scroll{overflow-x:auto}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.tabs button{background:transparent;color:var(--muted);border-color:var(--line);
+  padding:5px 12px;font-size:13px;font-weight:500}
+.tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent);
+  font-weight:600}
+.tabs button:disabled{opacity:.4}
+.tabs .count{opacity:.7;font-weight:400;margin-left:5px}
 .legend{color:var(--muted);font-size:12px;margin-top:10px}
 .benched{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 0;
   border-bottom:1px solid var(--line)}
@@ -148,6 +159,7 @@ pre{margin:0;max-height:280px;overflow:auto;font-size:12px;color:var(--muted);
 </div>
 
 <div class="card">
+  <div class="tabs" id="tabs"></div>
   <div class="scroll"><table>
     <thead><tr>
       <th>#</th>
@@ -210,7 +222,9 @@ const PHASES = {
   starting:    'starting',
 };
 
-let rows = [], benched = new Set(), live = '';
+let rows = [], benched = new Set(), live = '', part = '';
+const PART_LABELS = {'': 'All day', night: 'Night 00-06', morning: 'Morning 06-12',
+  afternoon: 'Afternoon 12-18', evening: 'Evening 18-24'};
 // Default order is the server\'s: median first, ties broken by worst round.
 let sortKey = null, sortDir = -1;
 
@@ -246,8 +260,23 @@ document.querySelectorAll('th[data-key]').forEach(th => {
   };
 });
 
+function drawTabs(cov){
+  const total = Object.values(cov).reduce((a, b) => a + b, 0);
+  document.getElementById('tabs').innerHTML = Object.keys(PART_LABELS).map(k => {
+    const n = k === '' ? total : cov[k];
+    // An empty slice is disabled rather than hidden: "not measured yet" is
+    // information, and hiding it would read as a verdict about the CDNs.
+    return `<button data-part="${k}" class="${k === part ? 'on' : ''}"
+      ${n === 0 && k !== '' ? 'disabled' : ''}>${PART_LABELS[k]}
+      <span class="count">${n}</span></button>`;
+  }).join('');
+  document.querySelectorAll('#tabs button').forEach(b => {
+    b.onclick = () => { part = b.dataset.part; refresh(); };
+  });
+}
+
 async function refresh(){
-  const d = await (await fetch('api/state')).json();
+  const d = await (await fetch('api/state' + (part ? '?part=' + part : ''))).json();
   const s = d.state;
 
   const st = document.getElementById('status');
@@ -278,6 +307,7 @@ async function refresh(){
 
   rows = d.stats;
   benched = new Set(d.benched.map(b => b.cdn));
+  drawTabs(d.coverage);
   render();
 
   const card = document.getElementById('bench-card');
@@ -304,7 +334,8 @@ async function refresh(){
        ${d.pick.median.toFixed(2)}x over ${d.pick.runs} rounds, worst round
        ${d.pick.worst_run.toFixed(2)}x, spread &plusmn;${d.pick.spread.toFixed(2)}</div>`
     : `<div class="pick" style="border-color:var(--muted)">Nothing has proven
-       steady yet &mdash; each CDN needs at least two rounds.</div>`;
+       steady ${part ? 'in the ' + PART_LABELS[part].toLowerCase() : 'yet'}
+       &mdash; each CDN needs at least two rounds${part ? ' in this slot' : ''}.</div>`;
 }
 document.getElementById('run').onclick = async e => {
   e.target.disabled = true;
@@ -335,13 +366,18 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
         elif path == "/api/state":
             records = storage.load()
-            table = aggregate(records)
+            query = parse_qs(urlparse(self.path).query)
+            part = (query.get("part") or [""])[0]
+            part = part if part in PARTS else ""
+            table = aggregate(records, part=part)
             pick = best(table)
             payload = {
                 "state": self.runner.snapshot(),
                 "stats": [s.as_dict() for s in table],
                 "pick": pick.as_dict() if pick else None,
                 "measurements": len(records),
+                "part": part,
+                "coverage": coverage(records),
                 "benched": [
                     {"cdn": name, **info} for name, info in bench.load().items()
                 ],

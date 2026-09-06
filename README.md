@@ -12,7 +12,7 @@ Several resellers run the same OTTClub panel — **ilook.tv** and
 **vipdrive.net** among them — so point `PANEL_URL` at whichever one your
 subscription is with.
 
-![tests](https://img.shields.io/badge/tests-99%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-115%20passing-brightgreen)
 ![docker](https://img.shields.io/badge/docker-1.32GB-blue)
 
 ![dashboard](dashboard.png)
@@ -138,6 +138,27 @@ rather than the best median.
 `ROUND_PAUSE=manual` holds the daemon still until you press **Run round** on
 the dashboard. Handy if you only want to measure during the hours you
 actually watch.
+
+## Time of day
+
+The same journal can be read for one part of the day at a time — night 00-06,
+morning 06-12, afternoon 12-18, evening 18-24, in the container's local time
+(`TZ`). Tabs on the dashboard switch between them.
+
+This is not a nicety. Measured on a live account, the automatic option read
+3.28x at 19:12 and 1.43x at 23:34; Germany read 1.81x at 22:00 and 7.36x at
+23:48. Averaged into one number, neither the evening nor the night is
+described. Sliced, the best CDN for the evening turned out not to be the best
+for the night.
+
+A round lasts hours and crosses these boundaries, so the split also corrects
+for a bias inside a single round: the CDNs measured last are measured later
+at night than the ones at the start.
+
+Each slice needs its own two rounds per CDN before it recommends anything, so
+expect empty slices at first. A slice with no data is shown as such rather
+than hidden — "not measured yet" is information, and hiding it would read as
+a verdict.
 
 ## Benching the hopeless ones
 

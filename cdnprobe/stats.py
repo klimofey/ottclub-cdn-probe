@@ -4,8 +4,35 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import asdict, dataclass
+from datetime import datetime
 
 from . import config
+
+# Parts of the day, in the container's local time. A CDN good at 2am is not
+# necessarily good at 9pm - one measured here read 1.81x in the evening and
+# 7.36x an hour before midnight - so the same journal is sliced by when the
+# measurement happened. A round lasts hours and crosses these boundaries, so
+# the split also corrects for CDNs later in a round being measured later at
+# night than the ones at the start.
+PARTS = {
+    "night": (0, 6),
+    "morning": (6, 12),
+    "afternoon": (12, 18),
+    "evening": (18, 24),
+}
+
+
+def part_of_day(at: str) -> str:
+    """Which part of the day a measurement falls in, in local time."""
+    try:
+        moment = datetime.fromisoformat(at).astimezone()
+    except (ValueError, TypeError):
+        return ""
+    hour = moment.hour
+    for name, (start, end) in PARTS.items():
+        if start <= hour < end:
+            return name
+    return ""
 
 STEADY_SPREAD = 1.5  # above this, results jump around too much to trust
 
@@ -45,13 +72,16 @@ class CdnStats:
         return data
 
 
-def aggregate(records: list[dict]) -> list[CdnStats]:
-    """Rolls journal entries up per CDN.
+def aggregate(records: list[dict], part: str = "") -> list[CdnStats]:
+    """Rolls journal entries up per CDN, optionally for one part of the day.
 
     The headline figure is the median, not the mean: one bad round - a
     measurement that caught the previous CDN's pool before the switch landed
     - shifts a mean and leaves a median alone.
     """
+    if part:
+        records = [r for r in records if part_of_day(r.get("at", "")) == part]
+
     buckets: dict[str, list[dict]] = {}
     for record in records:
         buckets.setdefault(record["cdn"], []).append(record)
@@ -76,6 +106,20 @@ def aggregate(records: list[dict]) -> list[CdnStats]:
         )
     # Ordered by median, ties broken by the worst round: steadiness wins.
     return sorted(result, key=lambda s: (-s.median, -s.worst_run))
+
+
+def coverage(records: list[dict]) -> dict[str, int]:
+    """How many measurements exist per part of the day.
+
+    Shown so an empty slice reads as "not measured yet" rather than as a
+    verdict about the CDNs.
+    """
+    counts = {name: 0 for name in PARTS}
+    for record in records:
+        name = part_of_day(record.get("at", ""))
+        if name:
+            counts[name] += 1
+    return counts
 
 
 def best(stats: list[CdnStats]) -> CdnStats | None:
