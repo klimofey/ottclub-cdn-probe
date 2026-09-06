@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import Counter
 from datetime import datetime, timezone
 
 from . import bench, config, stats, storage
@@ -243,10 +244,20 @@ class Runner:
             # reference that tells "this CDN is bad" apart from "tonight is
             # bad", so it is never benched.
             protected = all_options[0].label if all_options else ""
+            original = [o.label for o in all_options]
             options = bench.active(all_options, protected)
             benched = bench.load()
             # One benched CDN per round gets re-tested, oldest check first, so
             # a CDN that recovers is not shut out forever.
+            # Least-measured first. A round always restarting at the top of
+            # the list means any interruption - an update, a crash, a reboot -
+            # re-measures the same opening CDNs and never reaches the tail,
+            # which biases the comparison toward whatever the provider happens
+            # to list first. Ordering by coverage makes the next round repair
+            # the damage instead of compounding it.
+            seen = Counter(r["cdn"] for r in storage.load())
+            options.sort(key=lambda o: (seen[o.label], original.index(o.label)))
+
             paroled = bench.next_parole(benched)
             if paroled:
                 options = options + [

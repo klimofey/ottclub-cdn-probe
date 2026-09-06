@@ -12,7 +12,7 @@ Several resellers run the same OTTClub panel — **ilook.tv** and
 **vipdrive.net** among them — so point `PANEL_URL` at whichever one your
 subscription is with.
 
-![tests](https://img.shields.io/badge/tests-121%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-127%20passing-brightgreen)
 ![docker](https://img.shields.io/badge/docker-1.32GB-blue)
 
 ![dashboard](dashboard.png)
@@ -225,6 +225,12 @@ on the bench each is re-tested roughly every nine rounds.
 
 The dashboard also offers a manual release button, for overriding the machine
 rather than waiting for it.
+
+Rounds walk the least-measured CDN first. A round that always restarted at
+the top of the list would re-measure the opening CDNs after every
+interruption - an update, a crash, a reboot - and never reach the tail;
+observed live as one CDN with five rounds beside another with one. Ordering by
+coverage makes the next round repair that rather than compound it.
 
 ## How long a round takes
 
