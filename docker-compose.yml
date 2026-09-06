@@ -1,7 +1,10 @@
 services:
   cdnprobe:
+    # Pulled from GitHub's registry by default, so no clone is needed to run
+    # it. `docker compose up --build` still builds locally from this repo.
+    image: ${CDNPROBE_IMAGE:-ghcr.io/klimofey/ottclub-cdn-probe:latest}
     build: .
-    image: cdnprobe
+    pull_policy: ${CDNPROBE_PULL:-always}
     container_name: cdnprobe
     restart: unless-stopped
     ports:

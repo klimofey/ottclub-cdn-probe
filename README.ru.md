@@ -43,57 +43,62 @@ CDN, доступные аккаунту, замеряет их снова и с
 
 ## Установка
 
-### Через Docker Compose
+Образ публикуется в реестре GitHub, поэтому **клонировать необязательно** —
+репозиторий нужен только чтобы собрать образ самому или менять код.
+
+### Без клонирования: одна команда
 
 ```bash
-git clone https://github.com/klimofey/ottclub-cdn-probe
-cd ottclub-cdn-probe
-cp .env.example .env          # вписать почту и пароль аккаунта
-docker compose up -d          # собрать и запустить
-open http://localhost:8080
-```
-
-```bash
-docker compose logs -f        # смотреть, что происходит
-docker compose restart        # применить изменения в .env
-docker compose down           # остановить, замеры сохранятся
-docker compose down -v        # остановить и стереть историю
-```
-
-### Через голый Docker
-
-```bash
-git clone https://github.com/klimofey/ottclub-cdn-probe
-cd ottclub-cdn-probe
-docker build -t cdnprobe .
-
-docker volume create cdnprobe-data
-
 docker run -d --name cdnprobe --restart unless-stopped \
   -p 8080:8080 \
   -e ILOOK_EMAIL='you@example.com' \
   -e ILOOK_PASSWORD='твой-пароль' \
   -e ROUND_PAUSE=none \
   -v cdnprobe-data:/data \
-  cdnprobe
+  ghcr.io/klimofey/ottclub-cdn-probe:latest
 ```
 
-Любые настройки из таблицы ниже добавляются такими же флагами `-e`. Например,
-мерить только ночью и оставлять лучший CDN:
+Дальше открыть <http://localhost:8080>. Любая настройка из таблицы ниже
+добавляется таким же флагом `-e`. Например, мерить только ночью и оставлять
+лучший CDN:
 
 ```bash
   -e ACTIVE_HOURS=01:00-07:00 -e TZ=Asia/Jerusalem -e AUTO_APPLY=true \
 ```
 
+### Без клонирования: Docker Compose
+
+Два небольших файла, репозиторий не нужен:
+
 ```bash
-docker logs -f cdnprobe               # смотреть, что происходит
-docker restart cdnprobe               # применить изменённые настройки
-docker rm -f cdnprobe                 # остановить, замеры сохранятся
-docker volume rm cdnprobe-data        # стереть историю
+mkdir cdnprobe && cd cdnprobe
+curl -O https://raw.githubusercontent.com/klimofey/ottclub-cdn-probe/main/docker-compose.yml
+curl -o .env https://raw.githubusercontent.com/klimofey/ottclub-cdn-probe/main/.env.example
+$EDITOR .env                  # почта и пароль
+docker compose up -d
 ```
 
-В томе лежат история замеров и кэш сессии браузера — его надо сохранять между
-пересборками, ради многодневной статистики всё и затевалось.
+### Из исходников
+
+```bash
+git clone https://github.com/klimofey/ottclub-cdn-probe
+cd ottclub-cdn-probe
+cp .env.example .env
+docker compose up -d --build   # --build собирает локально
+```
+
+### Повседневное
+
+```bash
+docker compose logs -f        # или: docker logs -f cdnprobe
+docker compose pull && docker compose up -d    # обновиться до свежего образа
+docker compose restart        # применить изменения в .env
+docker compose down           # остановить, замеры сохранятся
+docker compose down -v        # остановить и стереть историю
+```
+
+В томе лежат история замеров и кэш сессии браузера — его надо сохранять при
+обновлениях, ради многодневной статистики всё и затевалось.
 
 ### Разовые команды
 

@@ -48,57 +48,62 @@ logs into — so the account you give it is the one that gets hammered.
 
 ## Install
 
-### With Docker Compose
+The image is published to GitHub's registry, so **cloning is optional** - it
+is only needed if you want to build or modify the code.
+
+### Without cloning: one command
 
 ```bash
-git clone https://github.com/klimofey/ottclub-cdn-probe
-cd ottclub-cdn-probe
-cp .env.example .env          # put your account email and password in it
-docker compose up -d          # builds and starts
-open http://localhost:8080
-```
-
-```bash
-docker compose logs -f        # follow what it is doing
-docker compose restart        # apply changes to .env
-docker compose down           # stop, keeping the measurements
-docker compose down -v        # stop and wipe the history too
-```
-
-### With plain Docker
-
-```bash
-git clone https://github.com/klimofey/ottclub-cdn-probe
-cd ottclub-cdn-probe
-docker build -t cdnprobe .
-
-docker volume create cdnprobe-data
-
 docker run -d --name cdnprobe --restart unless-stopped \
   -p 8080:8080 \
   -e ILOOK_EMAIL='you@example.com' \
   -e ILOOK_PASSWORD='your-password' \
   -e ROUND_PAUSE=none \
   -v cdnprobe-data:/data \
-  cdnprobe
+  ghcr.io/klimofey/ottclub-cdn-probe:latest
 ```
 
-Add whichever settings you want from the table below as further `-e` flags,
-for example measuring only at night and leaving the best CDN applied:
+Then open <http://localhost:8080>. Add any setting from the table below as a
+further `-e` flag, for example measuring only at night and leaving the best
+CDN applied:
 
 ```bash
-  -e ACTIVE_HOURS=01:00-07:00 -e TZ=Asia/Jerusalem -e AUTO_APPLY=true \
+  -e ACTIVE_HOURS=01:00-07:00 -e TZ=Europe/Berlin -e AUTO_APPLY=true \
 ```
 
+### Without cloning: Docker Compose
+
+Two small files, no repository:
+
 ```bash
-docker logs -f cdnprobe               # follow what it is doing
-docker restart cdnprobe               # apply changed settings
-docker rm -f cdnprobe                 # stop, keeping the measurements
-docker volume rm cdnprobe-data        # wipe the history
+mkdir cdnprobe && cd cdnprobe
+curl -O https://raw.githubusercontent.com/klimofey/ottclub-cdn-probe/main/docker-compose.yml
+curl -o .env https://raw.githubusercontent.com/klimofey/ottclub-cdn-probe/main/.env.example
+$EDITOR .env                  # email and password
+docker compose up -d
+```
+
+### From source
+
+```bash
+git clone https://github.com/klimofey/ottclub-cdn-probe
+cd ottclub-cdn-probe
+cp .env.example .env
+docker compose up -d --build   # --build makes it compile locally
+```
+
+### Day to day
+
+```bash
+docker compose logs -f        # or: docker logs -f cdnprobe
+docker compose pull && docker compose up -d    # update to the latest image
+docker compose restart        # apply changes to .env
+docker compose down           # stop, keeping the measurements
+docker compose down -v        # stop and wipe the history too
 ```
 
 The volume holds the measurement history and the cached browser session, so
-keep it across rebuilds - the multi-day statistics are the whole point.
+keep it across updates - the multi-day statistics are the whole point.
 
 ### One-off commands
 
