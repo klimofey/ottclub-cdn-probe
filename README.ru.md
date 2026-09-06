@@ -43,32 +43,8 @@ CDN, доступные аккаунту, замеряет их снова и с
 
 ## Установка
 
-Образ публикуется в реестре GitHub, поэтому **клонировать необязательно** —
-репозиторий нужен только чтобы собрать образ самому или менять код.
-
-### Без клонирования: одна команда
-
-```bash
-docker run -d --name cdnprobe --restart unless-stopped \
-  -p 8080:8080 \
-  -e ILOOK_EMAIL='you@example.com' \
-  -e ILOOK_PASSWORD='твой-пароль' \
-  -e ROUND_PAUSE=none \
-  -v cdnprobe-data:/data \
-  ghcr.io/klimofey/ottclub-cdn-probe:latest
-```
-
-Дальше открыть <http://localhost:8080>. Любая настройка из таблицы ниже
-добавляется таким же флагом `-e`. Например, мерить только ночью и оставлять
-лучший CDN:
-
-```bash
-  -e ACTIVE_HOURS=01:00-07:00 -e TZ=Asia/Jerusalem -e AUTO_APPLY=true \
-```
-
-### Без клонирования: Docker Compose
-
-Сохранить это как `docker-compose.yml` и выполнить `docker compose up -d`:
+Сохранить как `docker-compose.yml`, выполнить `docker compose up -d`, открыть
+<http://localhost:8080>.
 
 ```yaml
 services:
@@ -93,37 +69,21 @@ volumes:
   cdnprobe-data:
 ```
 
-### Из исходников
+Или вообще без файла:
 
 ```bash
-git clone https://github.com/klimofey/ottclub-cdn-probe
-cd ottclub-cdn-probe
-cp .env.example .env
-docker compose up -d --build   # --build собирает локально
+docker run -d --name cdnprobe --restart unless-stopped -p 8080:8080 \
+  -e ILOOK_EMAIL='you@example.com' -e ILOOK_PASSWORD='пароль' \
+  -v cdnprobe-data:/data ghcr.io/klimofey/ottclub-cdn-probe:latest
 ```
-
-### Повседневное
 
 ```bash
-docker compose logs -f        # или: docker logs -f cdnprobe
-docker compose pull && docker compose up -d    # обновиться до свежего образа
-docker compose restart        # применить изменения в .env
-docker compose down           # остановить, замеры сохранятся
-docker compose down -v        # остановить и стереть историю
+docker compose logs -f                       # смотреть, что происходит
+docker compose pull && docker compose up -d  # обновиться
 ```
 
-В томе лежат история замеров и кэш сессии браузера — его надо сохранять при
-обновлениях, ради многодневной статистики всё и затевалось.
-
-### Разовые команды
-
-Пригодятся без запуска демона:
-
-```bash
-docker compose run --rm cdnprobe list    # плейлист и список CDN аккаунта
-docker compose run --rm cdnprobe once    # один круг и выход
-docker compose run --rm cdnprobe stats   # печать таблицы
-```
+В томе лежит история замеров — ради статистики всё и затевалось, так что при
+обновлениях его надо сохранять.
 
 ## Настройки
 

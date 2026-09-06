@@ -48,32 +48,8 @@ logs into — so the account you give it is the one that gets hammered.
 
 ## Install
 
-The image is published to GitHub's registry, so **cloning is optional** - it
-is only needed if you want to build or modify the code.
-
-### Without cloning: one command
-
-```bash
-docker run -d --name cdnprobe --restart unless-stopped \
-  -p 8080:8080 \
-  -e ILOOK_EMAIL='you@example.com' \
-  -e ILOOK_PASSWORD='your-password' \
-  -e ROUND_PAUSE=none \
-  -v cdnprobe-data:/data \
-  ghcr.io/klimofey/ottclub-cdn-probe:latest
-```
-
-Then open <http://localhost:8080>. Add any setting from the table below as a
-further `-e` flag, for example measuring only at night and leaving the best
-CDN applied:
-
-```bash
-  -e ACTIVE_HOURS=01:00-07:00 -e TZ=Europe/Berlin -e AUTO_APPLY=true \
-```
-
-### Without cloning: Docker Compose
-
-Save this as `docker-compose.yml` and run `docker compose up -d`:
+Save as `docker-compose.yml`, run `docker compose up -d`, open
+<http://localhost:8080>.
 
 ```yaml
 services:
@@ -98,37 +74,21 @@ volumes:
   cdnprobe-data:
 ```
 
-### From source
+Or without a file at all:
 
 ```bash
-git clone https://github.com/klimofey/ottclub-cdn-probe
-cd ottclub-cdn-probe
-cp .env.example .env
-docker compose up -d --build   # --build makes it compile locally
+docker run -d --name cdnprobe --restart unless-stopped -p 8080:8080 \
+  -e ILOOK_EMAIL='you@example.com' -e ILOOK_PASSWORD='your-password' \
+  -v cdnprobe-data:/data ghcr.io/klimofey/ottclub-cdn-probe:latest
 ```
-
-### Day to day
 
 ```bash
-docker compose logs -f        # or: docker logs -f cdnprobe
-docker compose pull && docker compose up -d    # update to the latest image
-docker compose restart        # apply changes to .env
-docker compose down           # stop, keeping the measurements
-docker compose down -v        # stop and wipe the history too
+docker compose logs -f                       # watch it work
+docker compose pull && docker compose up -d  # update
 ```
 
-The volume holds the measurement history and the cached browser session, so
-keep it across updates - the multi-day statistics are the whole point.
-
-### One-off commands
-
-Useful without starting the daemon:
-
-```bash
-docker compose run --rm cdnprobe list    # playlist and CDNs the account offers
-docker compose run --rm cdnprobe once    # a single round, then exit
-docker compose run --rm cdnprobe stats   # print the table
-```
+The volume keeps the measurement history; the statistics are the whole point,
+so leave it in place across updates.
 
 ## Configuration
 
