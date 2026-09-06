@@ -303,6 +303,52 @@ document.querySelectorAll('th[data-key]').forEach(th => {
 });
 
 const SERIES_COLORS = ['var(--s0)','var(--s1)','var(--s2)','var(--s3)','var(--s4)'];
+
+// Monotone cubic interpolation (Fritsch-Carlson). Ordinary spline smoothing
+// overshoots between points, which here would be a lie rather than a flourish:
+// a curve sagging between two measurements of 2.4x would show a dip below the
+// 2x floor that never happened, and that floor is the whole point of the chart.
+// This variant is provably free of maxima and minima the data does not contain.
+function smoothPath(pts){
+  const n = pts.length;
+  if (n < 2) return '';
+  if (n === 2) return `M${pts[0][0]},${pts[0][1]}L${pts[1][0]},${pts[1][1]}`;
+
+  const dx = [], dy = [], slope = [];
+  for (let i = 0; i < n - 1; i++) {
+    dx[i] = pts[i+1][0] - pts[i][0];
+    dy[i] = pts[i+1][1] - pts[i][1];
+    slope[i] = dx[i] ? dy[i] / dx[i] : 0;
+  }
+
+  const m = [slope[0]];
+  for (let i = 1; i < n - 1; i++) {
+    // A sign change means a genuine turning point: pin the tangent flat so
+    // the curve turns exactly at the measurement, not around it.
+    m[i] = slope[i-1] * slope[i] <= 0 ? 0 : (slope[i-1] + slope[i]) / 2;
+  }
+  m[n-1] = slope[n-2];
+
+  for (let i = 0; i < n - 1; i++) {
+    if (slope[i] === 0) { m[i] = 0; m[i+1] = 0; continue; }
+    const a = m[i] / slope[i], b = m[i+1] / slope[i];
+    const h = a * a + b * b;
+    if (h > 9) {                       // the Fritsch-Carlson bound
+      const t = 3 / Math.sqrt(h);
+      m[i] = t * a * slope[i];
+      m[i+1] = t * b * slope[i];
+    }
+  }
+
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 0; i < n - 1; i++) {
+    const k = dx[i] / 3;
+    d += `C${pts[i][0]+k},${pts[i][1]+m[i]*k}`
+       + ` ${pts[i+1][0]-k},${pts[i+1][1]-m[i+1]*k}`
+       + ` ${pts[i+1][0]},${pts[i+1][1]}`;
+  }
+  return d;
+}
 let chartData = [], danger = 2;
 
 function drawChart(){
@@ -344,9 +390,9 @@ function drawChart(){
     const c = SERIES_COLORS[s.slot % SERIES_COLORS.length];
     const pts = s.points.map(p => [x(Date.parse(p.at)), y(p.ratio)]);
     if (pts.length > 1) {
-      g += `<polyline fill="none" stroke="${c}" stroke-width="2"
+      g += `<path fill="none" stroke="${c}" stroke-width="2"
         stroke-linejoin="round" stroke-linecap="round"
-        points="${pts.map(q => q.join(',')).join(' ')}"/>`;
+        d="${smoothPath(pts)}"/>`;
     }
     // 2px surface ring so overlapping markers stay separable.
     pts.forEach(q => {

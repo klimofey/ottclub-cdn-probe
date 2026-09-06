@@ -140,6 +140,12 @@ the `2x` floor marked. It exists because the table cannot show *when* things
 changed, and with this provider the when matters: the same CDN swung fourfold
 across one evening.
 
+Lines are monotone cubic curves rather than straight segments. Ordinary
+spline smoothing overshoots between points, which here would be a lie
+rather than a flourish: a curve sagging between two measurements of 2.4x
+would draw a dip below the 2x floor that never happened. The monotone
+variant is provably free of maxima and minima the data does not contain.
+
 Only the top few CDNs are drawn. Twenty lines is not a chart, and the question
 worth asking is how the plausible candidates behave, not how the hopeless ones
 do. Hovering names the measurement under the cursor - each CDN is measured at
