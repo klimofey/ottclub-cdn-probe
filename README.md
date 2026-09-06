@@ -73,14 +73,29 @@ CDN applied:
 
 ### Without cloning: Docker Compose
 
-Two small files, no repository:
+Save this as `docker-compose.yml` and run `docker compose up -d`:
 
-```bash
-mkdir cdnprobe && cd cdnprobe
-curl -O https://raw.githubusercontent.com/klimofey/ottclub-cdn-probe/main/docker-compose.yml
-curl -o .env https://raw.githubusercontent.com/klimofey/ottclub-cdn-probe/main/.env.example
-$EDITOR .env                  # email and password
-docker compose up -d
+```yaml
+services:
+  cdnprobe:
+    image: ghcr.io/klimofey/ottclub-cdn-probe:latest
+    container_name: cdnprobe
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      ILOOK_EMAIL: you@example.com
+      ILOOK_PASSWORD: your-password
+      ROUND_PAUSE: none          # none | manual | 30m | 1h
+      # PANEL_URL: https://ilook.tv
+      # ACTIVE_HOURS: "01:00-07:00"   # only measure while you sleep
+      # TZ: Europe/Berlin             # timezone the window is read in
+      # AUTO_APPLY: "true"            # leave the best CDN applied
+    volumes:
+      - cdnprobe-data:/data
+
+volumes:
+  cdnprobe-data:
 ```
 
 ### From source

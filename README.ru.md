@@ -68,14 +68,29 @@ docker run -d --name cdnprobe --restart unless-stopped \
 
 ### Без клонирования: Docker Compose
 
-Два небольших файла, репозиторий не нужен:
+Сохранить это как `docker-compose.yml` и выполнить `docker compose up -d`:
 
-```bash
-mkdir cdnprobe && cd cdnprobe
-curl -O https://raw.githubusercontent.com/klimofey/ottclub-cdn-probe/main/docker-compose.yml
-curl -o .env https://raw.githubusercontent.com/klimofey/ottclub-cdn-probe/main/.env.example
-$EDITOR .env                  # почта и пароль
-docker compose up -d
+```yaml
+services:
+  cdnprobe:
+    image: ghcr.io/klimofey/ottclub-cdn-probe:latest
+    container_name: cdnprobe
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      ILOOK_EMAIL: you@example.com
+      ILOOK_PASSWORD: your-password
+      ROUND_PAUSE: none          # none | manual | 30m | 1h
+      # PANEL_URL: https://ilook.tv
+      # ACTIVE_HOURS: "01:00-07:00"   # only measure while you sleep
+      # TZ: Europe/Berlin             # timezone the window is read in
+      # AUTO_APPLY: "true"            # leave the best CDN applied
+    volumes:
+      - cdnprobe-data:/data
+
+volumes:
+  cdnprobe-data:
 ```
 
 ### Из исходников
