@@ -131,16 +131,23 @@ class Runner:
         # Wake early if someone presses Run round.
         self._trigger.wait(timeout=self.pause)
 
-    def _await_window(self) -> None:
+    def _await_window(self, panel: "Panel | None" = None,
+                      options: "list[CdnOption] | None" = None) -> None:
         """Holds off while outside the allowed hours.
 
         Checked before every CDN rather than once per round: a round runs for
-        hours, so a window that was open at the start may well have closed by
-        the middle, and that is exactly when someone wants to watch TV.
+        hours, so a window open at the start may well have closed by the
+        middle, and that is exactly when someone wants to watch TV.
+
+        Crucially, the best CDN is applied BEFORE going to sleep. Auto-apply
+        at the end of a round is not enough: a round interrupted at dawn never
+        reaches its end, and the account would sit all day on whichever CDN
+        happened to be under test - the opposite of what the setting promises.
         """
         window = config.active_window()
         if window is None:
             return
+        applied_before_sleeping = False
         while not self._stop.is_set():
             local = datetime.now().astimezone()
             wait = config.seconds_until_window(
@@ -148,6 +155,12 @@ class Runner:
             )
             if wait == 0:
                 return
+            if (config.AUTO_APPLY and panel is not None and options
+                    and not applied_before_sleeping):
+                self._log("window closed mid-round - applying the best CDN "
+                          "before the account is left alone")
+                self._auto_apply(panel, options)
+                applied_before_sleeping = True
             self._set(
                 status="outside hours",
                 detail=f"active hours are {config.ACTIVE_HOURS}; resuming in "
@@ -264,7 +277,7 @@ class Runner:
                 for index, option in enumerate(options, start=1):
                     if self._stop.is_set():
                         return
-                    self._await_window()
+                    self._await_window(panel, all_options)
                     if self._stop.is_set():
                         return
                     on_parole = option.label in paroled

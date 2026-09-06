@@ -194,6 +194,29 @@ def round_pause() -> int | None:
     return parse_pause(os.environ.get("ROUND_PAUSE", "none"))
 
 
+def settings_warnings(pause: int | None = None) -> list[str]:
+    """Configuration that will not do what it looks like it does.
+
+    Worth saying out loud rather than leaving to be discovered: a setting
+    that silently achieves nothing is worse than one that is absent.
+    """
+    pause = round_pause() if pause is None else pause
+    notes = []
+    if AUTO_APPLY and pause == 0 and not ACTIVE_HOURS:
+        notes.append(
+            "AUTO_APPLY has no lasting effect with ROUND_PAUSE=none: the next "
+            "round starts immediately and switches the CDN away again within "
+            "minutes. Give the account time to rest - set ACTIVE_HOURS, or a "
+            "ROUND_PAUSE like 6h."
+        )
+    if ACTIVE_HOURS and not AUTO_APPLY:
+        notes.append(
+            "ACTIVE_HOURS is set but AUTO_APPLY is off, so the account is left "
+            "on whichever CDN was tested last rather than the best one."
+        )
+    return notes
+
+
 def describe_pause(seconds: int | None) -> str:
     if seconds is None:
         return "manual"

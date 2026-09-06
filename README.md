@@ -12,7 +12,7 @@ Several resellers run the same OTTClub panel — **ilook.tv** and
 **vipdrive.net** among them — so point `PANEL_URL` at whichever one your
 subscription is with.
 
-![tests](https://img.shields.io/badge/tests-94%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-99%20passing-brightgreen)
 ![docker](https://img.shields.io/badge/docker-1.32GB-blue)
 
 ![dashboard](dashboard.png)
@@ -119,6 +119,17 @@ The journal is pruned on every write. Age is the primary filter and it is
 there for accuracy, not disk space: CDN quality drifts from day to day, so a
 month-old round describes a different network and only blurs today's median.
 At a dozen rounds a day the file settles around 2 MB and stays there.
+
+`AUTO_APPLY` needs the account to be left alone afterwards to mean anything.
+With `ROUND_PAUSE=none` the next round begins at once and switches the CDN
+away within minutes, so the setting achieves nothing - the container says so
+on startup. Pair it with `ACTIVE_HOURS`, or with a pause long enough to watch
+something in.
+
+When the window closes mid-round, the best CDN is applied before the round
+goes to sleep, not only when a round finishes. Without that the account would
+sit all day on whichever CDN happened to be under test at dawn - the opposite
+of what the setting promises.
 
 Any column on the dashboard sorts on click - useful for asking a different
 question of the same data, such as "which CDN has the best *worst* round"

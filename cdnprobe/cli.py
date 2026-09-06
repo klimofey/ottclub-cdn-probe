@@ -20,6 +20,9 @@ def cmd_serve(args) -> None:
     worker = threading.Thread(target=runner.run_forever, daemon=True)
     worker.start()
 
+    for note in config.settings_warnings(pause):
+        print(f"warning: {note}", flush=True)
+
     print(f"dashboard  http://localhost:{config.WEB_PORT}", flush=True)
     print(f"pause between rounds: {config.describe_pause(pause)}", flush=True)
     if pause is None:
