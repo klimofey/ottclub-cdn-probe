@@ -62,10 +62,16 @@ EDGE_CAP_SECONDS = float(os.environ.get("EDGE_CAP_SECONDS", "3.0"))
 EDGE_CAP_BYTES = int(os.environ.get("EDGE_CAP_MB", "6")) * 1024 * 1024
 EDGE_TIMEOUT = float(os.environ.get("EDGE_TIMEOUT", "15"))
 
-# The provider needs minutes to route the stream through a newly chosen CDN.
-# We detect the change by watching the edge pool rather than waiting blindly.
-PROPAGATION_TIMEOUT = int(os.environ.get("PROPAGATION_TIMEOUT", "180"))
-PROPAGATION_POLL = 10
+# How long to let a newly chosen CDN take over before measuring it. The panel
+# promises 5-10 minutes; measuring sooner catches a mixture of the old CDN and
+# the new one, which reads as a fault of the new one and is not.
+#
+# This costs almost nothing: a switch is only allowed every ~5 minutes anyway,
+# so settling for 3.5 and then measuring for ~2 finishes right as the next
+# switch becomes possible. Waiting less does not make the round faster - it
+# only makes the numbers wrong.
+SETTLE_SECONDS = int(os.environ.get("SETTLE_SECONDS", "210"))
+SETTLE_POLL = 15
 
 # Streams below this margin stall on any network hiccup.
 RATIO_DANGER = float(os.environ.get("RATIO_DANGER", "2.0"))

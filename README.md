@@ -12,7 +12,7 @@ Several resellers run the same OTTClub panel — **ilook.tv** and
 **vipdrive.net** among them — so point `PANEL_URL` at whichever one your
 subscription is with.
 
-![tests](https://img.shields.io/badge/tests-140%20passing-brightgreen)
+![tests](https://img.shields.io/badge/tests-144%20passing-brightgreen)
 ![docker](https://img.shields.io/badge/docker-1.32GB-blue)
 
 ![dashboard](dashboard.png)
@@ -106,6 +106,7 @@ Everything is an environment variable; only the first two are required.
 | `BENCH_MIN_ROUNDS` | `3` | Rounds a CDN must have before it can be benched |
 | `BENCH_BELOW_RATIO` | `0` | Median below this benches a CDN outright; `0` disables |
 | `PAROLE_PER_ROUND` | `1` | Benched CDNs re-tested per round; `0` disables |
+| `SETTLE_SECONDS` | `210` | Let a switch take over this long before measuring |
 | `HISTORY_DAYS` | `30` | Drop measurements older than this |
 | `HISTORY_MAX_RECORDS` | `20000` | Hard cap on journal size |
 
@@ -176,6 +177,23 @@ do. Hovering names the measurement under the cursor - each CDN is measured at
 its own moment, so the nearest real point is shown rather than a shared
 vertical slice that would imply simultaneity that does not exist.
 
+## Letting a switch land
+
+A newly chosen CDN is given **3.5 minutes** before anything is measured. The
+panel promises 5-10; measuring sooner catches a mixture of the outgoing CDN
+and the incoming one, and records the mixture as a fault of the incoming one.
+That is not hypothetical - a CDN read 0.86x that way, with a foreign site in
+its pool, while its owner was watching on it without a hitch.
+
+The wait is nearly free. A switch is only allowed every five minutes anyway,
+so settling for 3.5 and then measuring for two finishes right as the next
+switch becomes possible. Waiting less does not make a round faster; it only
+makes the numbers wrong.
+
+Whether the edge pool was seen to turn over is still recorded, but as a
+confidence flag rather than as the trigger to start measuring. A pool
+changing on one channel does not mean the switch has landed everywhere.
+
 ## Time of day
 
 The same journal can be read for one part of the day at a time — night 00-06,
@@ -245,7 +263,8 @@ coverage makes the next round repair that rather than compound it.
 Measured on a live account: **1.6 to 2.5 hours** for a full pass over 19
 CDNs, or about **50 minutes** once benching has trimmed the rotation to ten.
 
-The limit is not the measuring, which takes about two minutes per CDN. It is
+Most of that is spent letting a switch take over before measuring it — see
+below. The limit is not the measuring, which takes about two minutes per CDN. It is
 the provider, which accepts a CDN change roughly **once every five minutes**;
 the measurement fits inside that wait. The spread comes from how quickly the
 edge pool turns over after a switch - sometimes 20 seconds, sometimes the

@@ -321,10 +321,10 @@ class Runner:
                         if not self._apply(panel, option):
                             continue
                         selected = option.value
-                        self._set(selected_cdn=option.label, phase="propagating",
-                                  detail=f"{option.label} applied, waiting for the "
-                                         f"edge pool to turn over")
-                        confirmed = self._await_switch(http, watch, before)
+                        self._set(selected_cdn=option.label, phase="settling",
+                                  detail=f"{option.label} applied, letting it "
+                                         f"take over before measuring")
+                        confirmed = self._settle(http, watch, before)
 
                     self._set(phase="measuring",
                               detail=f"measuring {option.label}")
@@ -385,24 +385,37 @@ class Runner:
         self._log("  cooldown never cleared, skipping")
         return False
 
-    def _await_switch(self, http, watch, before: set[str]) -> bool:
-        """Waits for the edge pool to turn over.
+    def _settle(self, http, watch, before: set[str]) -> bool:
+        """Lets the new CDN take over before anything is measured.
 
-        The panel promises 5-10 minutes; in practice it has been seconds.
-        Watching for the change beats waiting a fixed time, and a timeout is
-        not a failure - CDNs share some sites, and the full measurement that
-        follows confirms the switch far more reliably anyway.
+        Deliberately waits the full period rather than starting as soon as the
+        pool looks different. A pool changing on one channel does not mean the
+        switch has landed everywhere: measuring at that moment catches a
+        mixture of the old CDN and the new one, and the mixture is recorded as
+        a fault of the new one. That is exactly how a CDN read 0.86x while its
+        owner was watching on it without a hitch.
+
+        The wait is nearly free - a switch is only allowed every ~5 minutes,
+        so this time would otherwise be spent idling. Returns whether the pool
+        was seen to change, which is the confidence flag, not the trigger.
         """
-        deadline = time.monotonic() + config.PROPAGATION_TIMEOUT
+        deadline = time.monotonic() + config.SETTLE_SECONDS
         started = time.monotonic()
+        changed = False
         while time.monotonic() < deadline and not self._stop.is_set():
-            fresh = discover_channel(http, watch, rounds=5, pause=1.0).networks
-            if fresh and (fresh - before or len(fresh & before) / len(fresh) < 0.6):
-                self._log(f"  pool changed after {time.monotonic() - started:.0f}s")
-                return True
-            if self._stop.wait(timeout=config.PROPAGATION_POLL):
-                return False
-        return False
+            fresh = discover_channel(http, watch, rounds=4, pause=1.0).networks
+            if fresh and not changed and (
+                fresh - before or len(fresh & before) / len(fresh) < 0.6
+            ):
+                changed = True
+                self._log(f"  pool turned over after {time.monotonic() - started:.0f}s")
+            left = deadline - time.monotonic()
+            self._set(detail=f"letting the switch settle, {max(left, 0):.0f}s left")
+            if left > 0 and self._stop.wait(timeout=min(config.SETTLE_POLL, left)):
+                return changed
+        if not changed:
+            self._log("  pool never turned over; measuring anyway, marked unconfirmed")
+        return changed
 
 
 def current_stats() -> list[stats.CdnStats]:

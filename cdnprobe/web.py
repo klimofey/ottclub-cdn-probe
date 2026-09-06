@@ -75,7 +75,7 @@ h1{font-size:20px;margin:0 0 4px}
   color:var(--muted)}
 .pill.running,.pill.measuring{background:color-mix(in srgb,var(--accent) 18%,transparent);
   color:var(--accent)}
-.pill.sleeping,.pill.waiting,.pill.cooldown,.pill.propagating,.pill.switching,
+.pill.sleeping,.pill.waiting,.pill.cooldown,.pill.settling,.pill.switching,
 .pill\\.outside{background:color-mix(in srgb,var(--warn) 20%,transparent);
   color:var(--warn)}
 .pill.error{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
@@ -278,7 +278,7 @@ const cls = v => v === 'solid' ? 'v-solid'
 const PHASES = {
   switching:   'asking the panel to switch',
   cooldown:    'waiting out the provider cooldown',
-  propagating: 'switched, waiting for the edge pool to turn over',
+  settling:    'switched, letting it take over before measuring',
   measuring:   'downloading segments from every edge',
   starting:    'starting',
 };
