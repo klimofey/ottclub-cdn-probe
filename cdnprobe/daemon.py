@@ -3,6 +3,10 @@
 One round covers all CDNs the account offers. Its length is dictated by the
 provider, which allows a CDN change only about once every five minutes, so a
 round takes a couple of hours regardless of how fast the measuring itself is.
+
+OBSERVE_ONLY replaces that walk with a single measurement of whatever the
+account is already set to, for a copy running beside the one that does the
+switching. See Runner.observe.
 """
 
 from __future__ import annotations
@@ -47,6 +51,7 @@ class Runner:
             "pause": config.describe_pause(pause),
             "active_hours": config.ACTIVE_HOURS or "always",
             "auto_apply": config.AUTO_APPLY,
+            "observe_only": config.OBSERVE_ONLY,
             "applied_cdn": "",
             "benched": [],
             "active_cdns": 0,
@@ -240,6 +245,12 @@ class Runner:
             # CDN select does not exist. Reading options without coming back
             # would silently look at the wrong document.
             panel.open_settings()
+
+            if config.OBSERVE_ONLY:
+                with client() as http:
+                    self.observe(panel, http, playlist_url)
+                return
+
             all_options = panel.cdn_options()
             current = panel.current_cdn()
             # The first option is the provider's automatic choice. It is the
@@ -360,6 +371,61 @@ class Runner:
 
             if config.AUTO_APPLY:
                 self._auto_apply(panel, options)
+
+    # --- one passive round ------------------------------------------------
+
+    def observe(self, panel: Panel, http, playlist_url: str) -> None:
+        """Measures whatever the account is already set to, and nothing else.
+
+        For a copy running beside the one that owns the switching. There is no
+        walk over the CDNs here and no cooldown to sit out: a passive round is
+        one measurement, so ROUND_PAUSE is what decides how often it happens.
+
+        The CDN is read before and after. The other copy may switch the
+        account mid-measurement, and a sample that straddles a switch
+        describes a blend of two CDNs - filed under either name it is a lie
+        that goes straight into the median. Dropping it costs one round;
+        keeping it argues for the wrong CDN for a month.
+        """
+        before = panel.current_cdn()
+        self._set(cdn=before.label, cdn_index=1, cdn_total=1, active_cdns=1,
+                  selected_cdn=before.label, phase="measuring",
+                  detail=f"watching {before.label} - nothing is switched")
+        self._log(f"observing {before.label}, the account's own setting")
+
+        channels = fetch_channels(http, playlist_url)[: config.CHANNELS]
+        if not channels:
+            raise RuntimeError("playlist contained no channels")
+        host, _ = balancer_of(channels)
+        self._set(balancer=host, channels=len(channels))
+        self._log(f"balancer {host}, sampling {len(channels)} channels")
+
+        results = probe_channels(
+            http, channels, config.DISCOVERY_ROUNDS,
+            on_event=lambda kind, msg: self._log(f"  {msg}"),
+        )
+        if not results:
+            self._log("  no edges measured, nothing to record")
+            return
+
+        # Re-opening the settings page rather than reading the stale document:
+        # the measurement took minutes, and over a long run the session behind
+        # that page expires.
+        panel.open_settings()
+        after = panel.current_cdn()
+        if after.value != before.value:
+            self._set(selected_cdn=after.label)
+            self._log(
+                f"  {before.label} became {after.label} mid-measurement - "
+                f"the sample covers both, dropping it"
+            )
+            return
+
+        record = storage.append(before.label, before.value, results, True)
+        self._log(
+            f"  {before.label}: {record['ratio_avg']:.2f}x, "
+            f"risk {record['risk_share'] * 100:.0f}%"
+        )
 
     def _apply(self, panel: Panel, option: CdnOption, attempts: int = 4) -> bool:
         """Selects a CDN, sitting out the provider's cooldown."""

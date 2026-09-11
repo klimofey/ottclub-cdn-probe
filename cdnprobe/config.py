@@ -10,6 +10,14 @@ import os
 import re
 from pathlib import Path
 
+
+def _flag(name: str, default: str = "false") -> bool:
+    """An on/off environment variable, spelled the way people spell them."""
+    return os.environ.get(name, default).strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 HISTORY_FILE = DATA_DIR / "history.jsonl"
@@ -113,9 +121,14 @@ ACTIVE_HOURS = os.environ.get("ACTIVE_HOURS", "").strip()
 
 # After a round, put the account on the CDN that has proven best. Off by
 # default: it changes a live setting, and that should be a deliberate choice.
-AUTO_APPLY = os.environ.get("AUTO_APPLY", "false").strip().lower() in {
-    "1", "true", "yes", "on"
-}
+AUTO_APPLY = _flag("AUTO_APPLY")
+
+# Measure the account, never steer it. For a second copy running beside the
+# one that does the switching: two probes both driving the CDN select would
+# fight, and each would record the other's CDN under its own name. Here a
+# round measures whatever the account is already set to and writes nothing
+# back - the numbers still land in the same journal and the same dashboard.
+OBSERVE_ONLY = _flag("OBSERVE_ONLY")
 
 _WINDOW_RE = re.compile(
     r"^(?P<sh>\d{1,2})(?::(?P<sm>\d{2}))?\s*[-\u2013]\s*"
@@ -216,14 +229,19 @@ def settings_warnings(pause: int | None = None) -> list[str]:
     """
     pause = round_pause() if pause is None else pause
     notes = []
-    if AUTO_APPLY and pause == 0 and not ACTIVE_HOURS:
+    if OBSERVE_ONLY and AUTO_APPLY:
+        notes.append(
+            "OBSERVE_ONLY and AUTO_APPLY contradict each other. Nothing is "
+            "switched while observing, so AUTO_APPLY is ignored."
+        )
+    if AUTO_APPLY and not OBSERVE_ONLY and pause == 0 and not ACTIVE_HOURS:
         notes.append(
             "AUTO_APPLY has no lasting effect with ROUND_PAUSE=none: the next "
             "round starts immediately and switches the CDN away again within "
             "minutes. Give the account time to rest - set ACTIVE_HOURS, or a "
             "ROUND_PAUSE like 6h."
         )
-    if ACTIVE_HOURS and not AUTO_APPLY:
+    if ACTIVE_HOURS and not AUTO_APPLY and not OBSERVE_ONLY:
         notes.append(
             "ACTIVE_HOURS is set but AUTO_APPLY is off, so the account is left "
             "on whichever CDN was tested last rather than the best one."

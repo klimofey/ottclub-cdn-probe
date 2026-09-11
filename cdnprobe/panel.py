@@ -226,6 +226,15 @@ class Panel:
         UI - the page stays silent and the setting simply does not change -
         whereas the response carries both the status and the cooldown left.
         """
+        # The single place that changes a live setting, so the single place
+        # worth guarding. A passive copy measures an account someone else is
+        # steering; one stray call from a future code path would have it
+        # fighting the active copy, invisibly and for hours.
+        if config.OBSERVE_ONLY:
+            raise RuntimeError(
+                "OBSERVE_ONLY is set: this copy measures the account, it never "
+                "changes it"
+            )
         page = self.page
         assert page is not None
         # Reload first: over a long run the document goes stale and a fetch

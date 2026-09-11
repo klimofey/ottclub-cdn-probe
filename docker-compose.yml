@@ -30,6 +30,13 @@ services:
       # Put the account on the best proven CDN when a round ends.
       AUTO_APPLY: ${AUTO_APPLY:-false}
 
+      # Measure without steering. A round becomes one measurement of whatever
+      # the account is already set to, and the CDN select is never written to.
+      # For a second copy watching an account another one is switching; give
+      # it its own ROUND_PAUSE, and its own data volume if you want its
+      # numbers kept apart.
+      OBSERVE_ONLY: ${OBSERVE_ONLY:-false}
+
       # Stop measuring CDNs that have repeatedly failed, so rounds stay
       # short and the plausible ones get sampled twice as often.
       # 0 disables the cap. Unbenching is manual, from the dashboard.

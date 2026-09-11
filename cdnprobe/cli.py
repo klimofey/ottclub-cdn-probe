@@ -25,6 +25,9 @@ def cmd_serve(args) -> None:
 
     print(f"dashboard  http://localhost:{config.WEB_PORT}", flush=True)
     print(f"pause between rounds: {config.describe_pause(pause)}", flush=True)
+    if config.OBSERVE_ONLY:
+        print("observe only - measures whichever CDN the account is on and "
+              "never switches it", flush=True)
     if pause is None:
         print("manual mode - nothing runs until you press Run round", flush=True)
     try:

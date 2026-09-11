@@ -157,7 +157,9 @@ pre{margin:0;max-height:280px;overflow:auto;font-size:12px;color:var(--muted);
 <div class="top">
   <div>
     <h1>CDN probe</h1>
-    <div class="sub">Which CDN actually keeps the stream fed</div>
+    <div class="sub">Which CDN actually keeps the stream fed
+      <span class="tag" id="observe" hidden>observe only &middot; never switches
+        the CDN</span></div>
   </div>
   <button class="ghost" id="theme">theme: system</button>
 </div>
@@ -499,8 +501,12 @@ async function refresh(){
   document.getElementById('selected').textContent = s.selected_cdn || '-';
   document.getElementById('pause').textContent = s.pause;
   document.getElementById('hours').textContent = s.active_hours;
-  document.getElementById('auto').textContent = s.auto_apply
-    ? (s.applied_cdn ? 'on \\u2192 ' + s.applied_cdn : 'on') : 'off';
+  // While observing, the account is someone else's to steer: saying "off"
+  // would read as a choice made here rather than one the mode forbids.
+  document.getElementById('observe').hidden = !s.observe_only;
+  document.getElementById('auto').textContent = s.observe_only
+    ? 'n/a \\u2014 observing'
+    : (s.auto_apply ? (s.applied_cdn ? 'on \\u2192 ' + s.applied_cdn : 'on') : 'off');
   document.getElementById('total').textContent = d.measurements;
   document.getElementById('detail').textContent = s.detail || '';
   document.getElementById('log').textContent = s.log.join('\\n');

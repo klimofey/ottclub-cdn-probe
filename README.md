@@ -35,6 +35,11 @@ option.
 have the best CDN left in place by morning. See
 [Testing on an account you also watch](#testing-on-an-account-you-also-watch).
 
+**Or run it passively.** With `OBSERVE_ONLY` the container never touches the
+CDN select at all: it measures whatever the account is already set to. Nothing
+is re-routed, so the account stays watchable around the clock. See
+[Two copies: one steering, one watching](#two-copies-one-steering-one-watching).
+
 Either way, note the container discovers the playlist link from the account it
 logs into — so the account you give it is the one that gets hammered.
 
@@ -97,6 +102,7 @@ Everything is an environment variable; only the first two are required.
 | `ACTIVE_HOURS` | _(all day)_ | Only test inside this window, e.g. `01:00-07:00` |
 | `TZ` | `UTC` | Timezone the window is read in |
 | `AUTO_APPLY` | `false` | Switch the account to the best proven CDN after each round |
+| `OBSERVE_ONLY` | `false` | Measure the CDN the account is on and never switch it |
 | `WEB_PORT` | `8080` | Dashboard port on the host |
 | `DISCOVERY_ROUNDS` | `20` | Balancer polls per channel; more gives better weighting |
 | `CHANNELS` | `2` | Channels sampled per round |
@@ -295,6 +301,36 @@ setting alone and says so in the log.
 
 That said, a separate cheap subscription is still the cleaner answer if you
 want rounds running around the clock.
+
+## Two copies: one steering, one watching
+
+`OBSERVE_ONLY=true` turns a copy into an observer. A round stops being a walk
+over every CDN and becomes a single measurement of whichever CDN the account
+is already on; the CDN select is never written to, not by the round and not by
+`AUTO_APPLY`. `ROUND_PAUSE` decides how often it looks - a passive round takes
+minutes rather than hours, so `30m` is a reasonable gap.
+
+```env
+OBSERVE_ONLY=true
+ROUND_PAUSE=30m
+```
+
+Two things make this worth having. It is safe to point at the account you
+actually watch, because nothing is re-routed. And it lets a second machine
+watch an account that another copy - in Docker elsewhere, say - is switching:
+two copies both driving the select would fight each other, and each would
+record the other's CDN under its own name.
+
+The CDN is read from the panel before the measurement and again after it. If
+the other copy switched the account in between, the sample covers two CDNs at
+once, so it is dropped rather than filed under either name. A mislabelled
+round is worse than a missing one: it goes into the median and argues for the
+wrong CDN for as long as it is kept.
+
+Give the observer its own data volume if you want its numbers kept apart from
+the active copy's; point both at the same one and the journals merge, which is
+usually not what you want, because the observer's samples all describe the CDN
+the other copy happened to be testing.
 
 ## What it measures, and why not ping
 
