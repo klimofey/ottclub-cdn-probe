@@ -28,6 +28,9 @@ def summarise(results: list[EdgeResult]) -> dict:
         return {
             "edges": len(results), "alive": 0, "ratio_avg": 0.0,
             "ratio_worst": 0.0, "worst_ip": "", "networks": 0, "risk_share": 1.0,
+            # append() reads this key; without it a CDN whose every edge failed
+            # killed the round with KeyError instead of being recorded as dead.
+            "sites": [],
         }
     total_hits = sum(r.hits for r in ok) or 1
     worst = min(ok, key=lambda r: r.ratio)
