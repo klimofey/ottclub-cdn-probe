@@ -13,11 +13,20 @@ from .web import serve
 
 def cmd_serve(args) -> None:
     """Runs rounds in the background and serves the dashboard."""
+    config.require_credentials()  # fail here, in the main thread, not silently in the worker
     pause = config.round_pause()
     runner = Runner(pause)
     server = serve(runner)
 
-    worker = threading.Thread(target=runner.run_forever, daemon=True)
+    def work() -> None:
+        try:
+            runner.run_forever()
+        except BaseException as error:
+            # A dead worker behind a live dashboard looks like a hang: say so.
+            runner.record_worker_death(error)
+            raise
+
+    worker = threading.Thread(target=work, daemon=True)
     worker.start()
 
     for note in config.settings_warnings(pause):
@@ -40,6 +49,7 @@ def cmd_serve(args) -> None:
 
 def cmd_once(args) -> None:
     """A single round, then exit. Useful for a cron-style setup."""
+    config.require_credentials()
     runner = Runner(pause=None)
     runner.run_round()
     print(stats.table(stats.aggregate(storage.load())))

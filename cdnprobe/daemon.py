@@ -26,6 +26,15 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+FAILURE_DELAY_FIRST = 60
+FAILURE_DELAY_MAX = 900
+
+
+def failure_delay(failures: int) -> int:
+    """Seconds to wait after the Nth failed round in a row: 60, 120, 240 ... 900."""
+    return min(FAILURE_DELAY_FIRST * 2 ** (max(failures, 1) - 1), FAILURE_DELAY_MAX)
+
+
 class Runner:
     """Owns the measuring loop and the state the dashboard reads."""
 
@@ -84,6 +93,12 @@ class Runner:
         self._trigger.set()
         return True
 
+    def record_worker_death(self, error: BaseException) -> None:
+        """Makes the end of the round loop visible on the dashboard and in the log."""
+        text = f"worker stopped: {type(error).__name__}: {error}"
+        self._log(text)
+        self._set(status="error", detail=text)
+
     def stop(self) -> None:
         self._stop.set()
         self._trigger.set()
@@ -91,6 +106,7 @@ class Runner:
     # --- the loop ---------------------------------------------------------
 
     def run_forever(self) -> None:
+        failures = 0
         while not self._stop.is_set():
             if self.pause is None and not self._trigger.is_set():
                 self._set(status="waiting", detail="manual mode - press Run round",
@@ -111,10 +127,14 @@ class Runner:
             try:
                 self.run_round()
                 self._log(f"=== round {round_number} finished ===")
+                failures = 0
             except Exception as error:  # a bad round must not kill the daemon
+                failures += 1
                 self._log(f"round failed: {type(error).__name__}: {error}")
                 self._set(status="error", detail=f"{type(error).__name__}: {error}")
-                time.sleep(60)
+                # Back off: retrying a blocked login every minute keeps the
+                # site's rate limit and Cloudflare challenge alive.
+                self._stop.wait(timeout=failure_delay(failures))
 
             self._set(last_round_finished_at=now(), cdn="", cdn_index=0,
                       phase="", on_parole=False)

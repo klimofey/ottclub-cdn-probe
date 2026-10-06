@@ -25,6 +25,15 @@ USER_AGENT = (
 )
 
 
+class PanelError(RuntimeError):
+    """The panel did not behave as expected (login blocked, page changed).
+
+    An ordinary exception on purpose: the daemon runs rounds in a thread, where
+    SystemExit would end the thread silently and leave a dashboard that still
+    says "running". A failed round is logged and retried instead.
+    """
+
+
 @dataclass(frozen=True)
 class CdnOption:
     value: str
@@ -83,7 +92,7 @@ class Panel:
             return False
         self.login()
         if not self._open_settings_if_authorised():
-            raise SystemExit(f"Logged in but settings never opened: {self._last_failure}")
+            raise PanelError(f"Logged in but settings never opened: {self._last_failure}")
         return True
 
     def open_settings(self) -> None:
@@ -96,7 +105,7 @@ class Panel:
             return
         self.login()
         if not self._open_settings_if_authorised():
-            raise SystemExit(f"Cannot open settings: {self._last_failure}")
+            raise PanelError(f"Cannot open settings: {self._last_failure}")
 
     def _open_settings_if_authorised(self, attempts: int = 3) -> bool:
         """Right after a login the site bounces to /cabinet for a few seconds,
@@ -149,7 +158,7 @@ class Panel:
             if "/auth/login" not in page.url:
                 self.save_state()
                 return
-        raise SystemExit(
+        raise PanelError(
             "Login failed: Cloudflare did not let us through. Run with "
             "HEADLESS=0 and solve the challenge once - the session is cached."
         )
@@ -178,7 +187,7 @@ class Panel:
         if not url:
             url = find_playlist_url(page.content())
         if not url:
-            raise SystemExit(f"No playlist link found on {config.DOWNLOAD_URL}")
+            raise PanelError(f"No playlist link found on {config.DOWNLOAD_URL}")
         return url
 
     def _require_settings_page(self) -> None:
