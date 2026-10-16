@@ -158,7 +158,7 @@ ratio = длительность сегмента / (размер / скорос
 
 ```env
 ACTIVE_HOURS=01:00-07:00
-TZ=Asia/Jerusalem
+TZ=Europe/Berlin
 AUTO_APPLY=true
 ```
 

@@ -285,7 +285,7 @@ Two settings together make this workable without a second subscription:
 
 ```env
 ACTIVE_HOURS=01:00-07:00
-TZ=Asia/Jerusalem
+TZ=Europe/Berlin
 AUTO_APPLY=true
 ```
 

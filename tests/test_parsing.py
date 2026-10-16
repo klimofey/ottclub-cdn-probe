@@ -24,9 +24,9 @@ http://bda53a03.example.net/iptv/STREAMTOKEN/9314/index.m3u8
 MEDIA = """#EXTM3U
 #EXT-X-TARGETDURATION:10
 #EXTINF:9.961000,
-http://194.59.59.83/iptv/TOKEN/404/1788633242000.ts?md5=XZCdCdn5KPu-GuzGMfcO-Q
+http://203.0.113.10/iptv/TOKEN/404/1700000000000.ts?md5=SynthKey0one-ABCDEF_01
 #EXTINF:9.962000,
-http://213.183.40.147/iptv/TOKEN/404/1788633252000.ts?md5=c7iVOz_FK-vV20_XW9FU_w
+http://203.0.113.20/iptv/TOKEN/404/1700000010000.ts?md5=SynthKey0two_ABCDEF-02
 """
 
 
@@ -61,15 +61,15 @@ class TestMediaPlaylist:
     def test_extracts_segments(self):
         segments, target = parse_media_playlist(MEDIA)
         assert target == 10
-        assert segments[0].ip == "194.59.59.83"
-        assert segments[0].md5 == "XZCdCdn5KPu-GuzGMfcO-Q"
+        assert segments[0].ip == "203.0.113.10"
+        assert segments[0].md5 == "SynthKey0one-ABCDEF_01"
         assert segments[0].duration == pytest.approx(9.961)
 
     def test_segment_can_be_re_pointed_at_another_edge(self):
         """Any edge serves any segment - given that edge's own key."""
         segment = parse_media_playlist(MEDIA)[0][0]
         assert segment.url_for(ip="10.0.0.9", md5="OTHERKEY") == (
-            "http://10.0.0.9/iptv/TOKEN/404/1788633242000.ts?md5=OTHERKEY"
+            "http://10.0.0.9/iptv/TOKEN/404/1700000000000.ts?md5=OTHERKEY"
         )
 
     def test_empty_playlist(self):
